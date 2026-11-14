@@ -1,3 +1,7 @@
 {
-  "signalUrl": ""
+  "signalUrl": "",
+  "realtime": {
+    "url": "https://jjtfnduodxtulxvviasf.supabase.co",
+    "key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpqdGZuZHVvZHh0dWx4dnZpYXNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMyMDI4NDEsImV4cCI6MjEwODc3ODg0MX0.uwd9NXIQxNk2dq5I91ms8Ydbl_lE7lVxff7J9-vbXsU"
+  }
 }

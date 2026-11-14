@@ -6,7 +6,8 @@
 
 import { RtcPeer, type PeerState } from "../net/peer";
 import { RollbackSession } from "../net/rollback";
-import { SignalClient, resolveSignalUrl, type RoomState, type SignalMessage } from "../net/signal";
+import { SignalClient, resolveSignalUrl, type RoomState, type SignalMessage, type SignalLike } from "../net/signal";
+import { RealtimeSignal, loadRealtimeConfig } from "../net/signal-rt";
 import { createState } from "../game/engine";
 import { input } from "../game/input";
 import type { MatchConfig } from "../game/types";
@@ -42,7 +43,7 @@ export interface OnlineHooks {
 }
 
 export class OnlineClient {
-  signal: SignalClient | null = null;
+  signal: SignalLike | null = null;
   peer: RtcPeer | null = null;
   room: RoomData | null = null;
   selfId = "";
@@ -70,8 +71,16 @@ export class OnlineClient {
 
   async connect(name: string): Promise<void> {
     this.name = name || "Player";
-    this.signalUrl = await resolveSignalUrl();
-    const sig = new SignalClient({ url: this.signalUrl, name: this.name });
+    // Hosted builds signal through Supabase Realtime so online play needs no
+    // server of its own; the local Node server stays as the offline fallback.
+    const rt = await loadRealtimeConfig();
+    let sig: SignalLike;
+    if (rt) {
+      sig = new RealtimeSignal(rt, this.name);
+    } else {
+      this.signalUrl = await resolveSignalUrl();
+      sig = new SignalClient({ url: this.signalUrl, name: this.name });
+    }
     this.signal = sig;
     sig.onMessage((m) => this.onSignal(m));
     await sig.connect();

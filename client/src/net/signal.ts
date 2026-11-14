@@ -73,7 +73,18 @@ export async function resolveSignalUrl(): Promise<string> {
 
 type Handler = (m: SignalMessage) => void;
 
-export class SignalClient {
+/** Both transports (WebSocket server, Supabase Realtime) satisfy this. */
+export interface SignalLike {
+  selfId: string;
+  name: string;
+  latencyMs: number;
+  connect(): Promise<void>;
+  onMessage(h: Handler): () => void;
+  send(obj: unknown): void;
+  close(): void;
+}
+
+export class SignalClient implements SignalLike {
   private ws: WebSocket | null = null;
   private handlers = new Set<Handler>();
   private queue: unknown[] = [];
