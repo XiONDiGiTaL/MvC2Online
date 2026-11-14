@@ -33,6 +33,7 @@ export class OnlineView {
 
   attach(app: App) {
     this.app = app;
+    (window as unknown as { __online?: OnlineView }).__online = this;
     if (!this.root.isConnected) this.render();
   }
 
