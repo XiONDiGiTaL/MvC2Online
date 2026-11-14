@@ -491,7 +491,7 @@ function startMove(s: SimState, f: Fighter, idx: number, moves: MoveDef[]) {
   if (mv.hyper) {
     s.announce = 4;
     s.announceLife = 26;
-    spawnParticles(s, f.x, f.y + 70, 2, 14, 0xffd166);
+    spawnParticles(s, f.x, f.y + 70, 2, 14, 0x79a8ff);
   }
 }
 
@@ -609,7 +609,7 @@ function tagOut(s: SimState, f: Fighter): boolean {
   p.hitstun = 0;
   p.blockstun = 0;
   p.invuln = 16;
-  spawnParticles(s, p.x, p.y + 60, 2, 10, 0x7df9ff);
+  spawnParticles(s, p.x, p.y + 60, 2, 10, 0x79a8ff);
   return true;
 }
 
@@ -641,7 +641,7 @@ function processInput(s: SimState, f: Fighter, inp: number, moves: MoveDef[]) {
       f.hitstun = 0;
       f.pushed = 12;
       f.x -= f.facing * 26;
-      spawnParticles(s, f.x + f.facing * 30, f.y + 60, 0, 6, 0x9be9ff);
+      spawnParticles(s, f.x + f.facing * 30, f.y + 60, 0, 6, 0x79a8ff);
     }
     if (f.blockstun > 0) f.blockstun--;
     if (f.hitstun <= 0 && f.blockstun <= 0) {
@@ -851,7 +851,7 @@ function applyHit(
     defender.meter = Math.min(MAX_METER, defender.meter + 2);
     attacker.meter = Math.min(MAX_METER, attacker.meter + Math.round(h.meter * 0.35));
     defender.x -= attacker.facing * h.push;
-    spawnParticles(s, defender.x + attacker.facing * 24, defender.y + 60, 0, 4, 0x9be9ff);
+    spawnParticles(s, defender.x + attacker.facing * 24, defender.y + 60, 0, 4, 0x79a8ff);
   } else {
     defender.hp -= dmg;
     defender.hitstun = h.hitstun;
@@ -892,7 +892,7 @@ function applyHit(
 
     defender.x -= attacker.facing * h.push * 0.6;
     defender.vx = -attacker.facing * (h.push * 0.4);
-    spawnParticles(s, s.hitsparkX, s.hitsparkY, 0, h.dmg > 60 ? 10 : 6, 0xffe066);
+    spawnParticles(s, s.hitsparkX, s.hitsparkY, 0, h.dmg > 60 ? 10 : 6, 0xbfd8ff);
     s.hitsparkLife = 10;
   }
 
@@ -912,7 +912,7 @@ function applyHit(
       s.announceLife = 60;
       s.hitstop = 16;
       s.shake = 22;
-      spawnParticles(s, defender.x, defender.y + 60, 2, 26, 0xff5c7a);
+      spawnParticles(s, defender.x, defender.y + 60, 2, 26, 0xff8d9c);
       nextCharacter(s, defender.team);
     } else {
       defender.hp = 1; // assists cannot be KO'd in this engine (documented)
@@ -1085,7 +1085,7 @@ function projectilePass(s: SimState) {
       };
       applyHit(s, s.fighters[p.owner], d, fake, p.dmg, p.group);
       p.alive = false;
-      spawnParticles(s, p.x, p.y, 1, 8, 0x7df9ff);
+      spawnParticles(s, p.x, p.y, 1, 8, 0x79a8ff);
       break;
     }
   }
@@ -1232,7 +1232,7 @@ export function stepGame(s: SimState, cfg: MatchConfig, in0: number, in1: number
         nf.invuln = 40;
         s.active[t] = slot;
         s.incoming[t] = -1;
-        spawnParticles(s, nf.x, nf.y + 50, 2, 12, 0x7df9ff);
+        spawnParticles(s, nf.x, nf.y + 50, 2, 12, 0x79a8ff);
       }
     }
   }

@@ -66,12 +66,12 @@ export function stageName(i: number): string {
 function drawStage(ctx: CanvasRenderingContext2D, cam: Cam, stage: number, frame: number) {
   const g = ctx.createLinearGradient(0, 0, 0, VIEW_H);
   const hues = [
-    ["#10101c", "#2a1230", "#3b1340"],
-    ["#0a1420", "#123044", "#1d4257"],
-    ["#0a0a14", "#141a38", "#2a1a4a"],
-    ["#0b1210", "#12241c", "#1a3528"],
-    ["#150f0a", "#2c1c14", "#42241a"],
-    ["#0d0a14", "#20123a", "#341a52"],
+    ["#05070a", "#0a1220", "#12233c"],
+    ["#05080c", "#0a1424", "#102a44"],
+    ["#04060a", "#080f1c", "#0e1d33"],
+    ["#050709", "#0a1119", "#101f2e"],
+    ["#06070a", "#0b1020", "#131c33"],
+    ["#04060b", "#090f1f", "#0f1a33"],
   ][stage % 6];
   g.addColorStop(0, hues[0]);
   g.addColorStop(0.55, hues[1]);
@@ -145,7 +145,7 @@ function drawStage(ctx: CanvasRenderingContext2D, cam: Cam, stage: number, frame
 
   // ambient light pool
   const lg = ctx.createRadialGradient(VIEW_W / 2, FLOOR - 40, 40, VIEW_W / 2, FLOOR - 40, 620);
-  lg.addColorStop(0, "rgba(255,90,140,0.10)");
+  lg.addColorStop(0, "rgba(63,128,255,0.13)");
   lg.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = lg;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -300,7 +300,7 @@ function drawFighter(
   // invulnerability shimmer
   if (f.invuln > 0 && f.st !== FS.INTRO) {
     ctx.globalAlpha = 0.3;
-    ctx.strokeStyle = "#9be9ff";
+    ctx.strokeStyle = "#79a8ff";
     ctx.lineWidth = 2;
     rr(ctx, -22, shoulderY - 26, 46, -shoulderY + 34, 16);
     ctx.stroke();
@@ -312,7 +312,7 @@ function drawFighter(
   // assist marker
   if (f.st === FS.ASSIST || (!f.active && f.onScreen)) {
     ctx.save();
-    ctx.fillStyle = "rgba(125,249,255,0.85)";
+    ctx.fillStyle = "rgba(121,168,255,0.9)";
     ctx.font = "600 11px JetBrains Mono, monospace";
     ctx.textAlign = "center";
     ctx.fillText("ASSIST", bx, by - h - 14);
@@ -377,7 +377,7 @@ function drawHud(
     const y = 34;
     const active = s.fighters[t * 3 + s.active[t]];
     const pct = active.hp / active.maxHp;
-    drawBar(ctx, x, y, 440, 26, pct, right, ["#22c55e", "#eab308"]);
+    drawBar(ctx, x, y, 440, 26, pct, right, ["#3f80ff", "#79a8ff"]);
 
     // pixel-ish segment mask
     ctx.save();
@@ -424,7 +424,7 @@ function drawHud(
       rr(ctx, bx, VIEW_H - 58, 80, 16, 5);
       ctx.fill();
       if (filled > 0) {
-        ctx.fillStyle = filled >= 1 ? "#f97316" : "#3b82f6";
+        ctx.fillStyle = filled >= 1 ? "#79a8ff" : "#3f80ff";
         rr(ctx, bx + 2, VIEW_H - 56, 76 * filled, 12, 4);
         ctx.fill();
       }
@@ -449,7 +449,7 @@ function drawHud(
   ctx.lineWidth = 1;
   rr(ctx, VIEW_W / 2 - 62, 22, 124, 62, 16);
   ctx.stroke();
-  ctx.fillStyle = secs <= 10 ? "#f43f5e" : "#f8fafc";
+  ctx.fillStyle = secs <= 10 ? "#ff6b81" : "#f8fafc";
   ctx.font = "800 40px JetBrains Mono, monospace";
   ctx.fillText(String(Math.max(0, secs)).padStart(2, "0"), VIEW_W / 2, 58);
 
@@ -459,7 +459,7 @@ function drawHud(
     ctx.save();
     ctx.globalAlpha = 0.95;
     ctx.textAlign = right ? "right" : "left";
-    ctx.fillStyle = "#fde047";
+    ctx.fillStyle = "#79a8ff";
     ctx.font = "800 34px Inter, system-ui, sans-serif";
     const x = right ? VIEW_W - 60 : 60;
     ctx.fillText(`${s.comboHits} HITS`, x, 170);
@@ -482,8 +482,8 @@ function drawHud(
       ctx.textAlign = "center";
       const size = a === 2 ? 96 : a === 4 ? 40 : 72;
       ctx.font = `900 ${size}px Inter, system-ui, sans-serif`;
-      ctx.fillStyle = a === 2 ? "#f43f5e" : a === 4 ? "#fbbf24" : "#f8fafc";
-      ctx.shadowColor = a === 2 ? "rgba(244,63,94,0.8)" : "rgba(0,0,0,0.9)";
+      ctx.fillStyle = a === 2 ? "#ff6b81" : a === 4 ? "#79a8ff" : "#ffffff";
+      ctx.shadowColor = a === 2 ? "rgba(255,107,129,0.7)" : "rgba(0,0,0,0.9)";
       ctx.shadowBlur = 26;
       ctx.fillText(text, VIEW_W / 2, VIEW_H / 2 - 40);
       ctx.restore();
@@ -542,8 +542,8 @@ export function drawGame(
       if (!p.alive) continue;
       const g = ctx.createRadialGradient(p.x, FLOOR - p.y, 2, p.x, FLOOR - p.y, p.w);
       g.addColorStop(0, "#ffffff");
-      g.addColorStop(0.4, "#7df9ff");
-      g.addColorStop(1, "rgba(60,120,255,0)");
+      g.addColorStop(0.4, "#79a8ff");
+      g.addColorStop(1, "rgba(63,128,255,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(p.x, FLOOR - p.y, p.w * 0.9, 0, Math.PI * 2);
@@ -572,8 +572,8 @@ export function drawGame(
       ctx.globalAlpha = a;
       const g = ctx.createRadialGradient(x, y, 2, x, y, 60);
       g.addColorStop(0, "#ffffff");
-      g.addColorStop(0.35, "#ffe066");
-      g.addColorStop(1, "rgba(255,80,80,0)");
+      g.addColorStop(0.35, "#79a8ff");
+      g.addColorStop(1, "rgba(63,128,255,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(x, y, 60, 0, Math.PI * 2);
@@ -610,8 +610,8 @@ export function drawGame(
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     rr(ctx, 40, VIEW_H - 96, 300, 26, 6);
     ctx.fill();
-    ctx.fillStyle = "#7df9ff";
-    ctx.font = "600 12px JetBrains Mono, monospace";
+    ctx.fillStyle = "#79a8ff";
+    ctx.font = "500 12px JetBrains Mono, monospace";
     ctx.textAlign = "left";
     ctx.fillText(opts.netcode, 52, VIEW_H - 83);
     ctx.restore();
