@@ -9,6 +9,11 @@
 import type { App } from "../app";
 import { button, el, icon, toast } from "./dom";
 import { avatarFromFile, saveProfile } from "./profile";
+import {
+  addRemoteFriend, ensureSession, fetchRemoteFriends, fetchRemoteProfile,
+  loadSession, pushRemoteProfile, removeRemoteFriend, signIn, signOut, signUp,
+  type AccountSession,
+} from "../net/account";
 import { ROSTER } from "../game/roster";
 import { portraitUrl } from "../game/render";
 import type { LobbyUser } from "../net/lobby";
@@ -56,6 +61,10 @@ function saveFriends(list: Friend[]) {
     /* storage full or blocked: list stays for this session */
   }
 }
+
+// Module scope so the session outlives screen re-mounts; the storage copy is
+// the source of truth and this is just the in-memory mirror.
+let session: AccountSession | null = loadSession();
 
 function push(line: Line) {
   lines.push(line);
@@ -174,9 +183,26 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
     attrs: { type: "file", accept: "image/*" },
   }) as HTMLInputElement;
 
+  let profileTimer: number | null = null;
+
+  function pushProfileSoon() {
+    if (!session) return;
+    if (profileTimer !== null) window.clearTimeout(profileTimer);
+    profileTimer = window.setTimeout(() => {
+      const s = session;
+      if (!s) return;
+      void pushRemoteProfile(s, { username: app.profile.name, avatar: app.profile.avatar })
+        .catch((err: Error) => toast(`Could not save profile: ${err.message}`, "error"));
+    }, 600);
+  }
+  cleanup.push(() => {
+    if (profileTimer !== null) window.clearTimeout(profileTimer);
+  });
+
   function setAvatar(avatar: string) {
     app.profile = saveProfile({ ...app.profile, avatar });
     app.lobby?.setIdentity({ avatar });
+    pushProfileSoon();
     avaHost.replaceChildren(avatarNode(avatar, app.profile.name, 76), el("span", { class: "lb-ava-edit", text: "Edit" }));
     portraitGrid.querySelectorAll(".lb-portrait").forEach((n, i) => {
       n.classList.toggle("on", avatar === `@portrait:${i}`);
@@ -210,6 +236,7 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
     app.lobby?.setIdentity({ name: app.profile.name });
     app.settings.name = app.profile.name;
     app.persist();
+    pushProfileSoon();
     toast(`You are ${app.profile.name}`, "ok");
   };
   nameInput.addEventListener("blur", commitName);
@@ -220,6 +247,7 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
     }
   });
 
+  const accountBox = el("div", { class: "lb-account" });
   const profileBody = el("div", { class: "lb-profile" },
     avaHost,
     el("div", { class: "lb-profile-meta" },
@@ -227,7 +255,8 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
       el("div", { class: "lb-profile-row" }, onlineTag,
         el("button", { class: "lb-mini", text: "Upload", on: { click: () => uploadInput.click() } })
       ),
-      uploadInput
+      uploadInput,
+      accountBox
     )
   );
 
@@ -379,8 +408,13 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
 
   function toggleFriend(u: LobbyUser) {
     const idx = friends.findIndex((f) => f.id === u.id);
-    if (idx >= 0) friends.splice(idx, 1);
-    else friends.push({ id: u.id, name: u.name });
+    if (idx >= 0) {
+      friends.splice(idx, 1);
+      if (session) void removeRemoteFriend(session, u.id).catch(() => toast("Could not sync friend removal", "error"));
+    } else {
+      friends.push({ id: u.id, name: u.name });
+      if (session) void addRemoteFriend(session, { id: u.id, name: u.name }).catch(() => toast("Could not sync friend", "error"));
+    }
     saveFriends(friends);
     const counter = right.querySelectorAll(".lb-count")[0] as HTMLElement;
     if (counter) counter.textContent = String(friends.length);
@@ -390,7 +424,145 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
   function removeFriend(id: string) {
     friends = friends.filter((f) => f.id !== id);
     saveFriends(friends);
+    if (session) void removeRemoteFriend(session, id).catch(() => toast("Could not sync friend removal", "error"));
     renderUsers();
+  }
+
+  // ------------------------------------------------------------- account
+  function renderAccount() {
+    accountBox.replaceChildren();
+    if (session) {
+      accountBox.append(
+        el("div", { class: "lb-acct-on" },
+          el("span", { class: "lb-acct-mail", text: session.email, title: session.email }),
+          el("button", {
+            class: "lb-mini",
+            text: "Sign out",
+            on: {
+              click: () => {
+                signOut();
+                session = null;
+                renderAccount();
+                toast("Signed out on this device", "info");
+              },
+            },
+          })
+        )
+      );
+      return;
+    }
+
+    const mail = el("input", {
+      class: "lb-acct-input",
+      attrs: { type: "email", placeholder: "email", autocomplete: "email", spellcheck: "false" },
+    }) as HTMLInputElement;
+    const pass = el("input", {
+      class: "lb-acct-input",
+      attrs: { type: "password", placeholder: "password (8+ characters)", autocomplete: "current-password" },
+    }) as HTMLInputElement;
+    const note = el("p", { class: "lb-acct-note", text: "Sign in and your profile and friends follow you to any device." });
+    let busy = false;
+
+    const submit = async (mode: "in" | "up") => {
+      if (busy) return;
+      const email = mail.value.trim();
+      const password = pass.value;
+      if (!email || !password) {
+        note.textContent = "Enter an email and password.";
+        return;
+      }
+      if (mode === "up" && password.length < 8) {
+        note.textContent = "Use at least 8 characters.";
+        return;
+      }
+      busy = true;
+      note.textContent = mode === "in" ? "Signing in…" : "Creating account…";
+      try {
+        if (mode === "up") {
+          const result = await signUp(email, password);
+          if (!result.session) {
+            note.textContent = "Account created — open the confirmation email, then sign in.";
+            return;
+          }
+          session = result.session;
+        } else {
+          session = await signIn(email, password);
+        }
+        await adoptAccount();
+        renderAccount();
+        toast("Signed in", "ok");
+      } catch (err) {
+        note.textContent = (err as Error).message;
+      } finally {
+        busy = false;
+      }
+    };
+
+    for (const input of [mail, pass]) {
+      input.addEventListener("keydown", (ev) => {
+        ev.stopPropagation();
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          void submit("in");
+        }
+      });
+    }
+
+    accountBox.append(
+      el("div", { class: "lb-acct-form" }, mail, pass,
+        el("div", { class: "lb-acct-row" },
+          el("button", { class: "lb-mini on", text: "Sign in", on: { click: () => void submit("in") } }),
+          el("button", { class: "lb-mini", text: "Create", on: { click: () => void submit("up") } })
+        )
+      ),
+      note
+    );
+  }
+
+  /** Take the account's identity + friends, and keep the device copy in step. */
+  async function adoptAccount() {
+    const live = await ensureSession();
+    if (!live) {
+      session = null;
+      renderAccount();
+      return;
+    }
+    session = live;
+    // Presence keys on the account id so friends match on any device.
+    app.lobby?.identifyAs(live.userId);
+    app.lobby?.setIdentity({ name: app.profile.name, avatar: app.profile.avatar });
+
+    try {
+      const remote = await fetchRemoteProfile(live);
+      if (remote && remote.username) {
+        app.profile = saveProfile({
+          ...app.profile,
+          name: remote.username,
+          avatar: remote.avatar || app.profile.avatar,
+        });
+        nameInput.value = app.profile.name;
+        avaHost.replaceChildren(
+          avatarNode(app.profile.avatar, app.profile.name, 76),
+          el("span", { class: "lb-ava-edit", text: "Edit" })
+        );
+        app.lobby?.setIdentity({ name: app.profile.name, avatar: app.profile.avatar });
+      } else {
+        await pushRemoteProfile(live, { username: app.profile.name, avatar: app.profile.avatar });
+      }
+
+      const remoteFriends = await fetchRemoteFriends(live);
+      const known = new Set(remoteFriends.map((f) => f.id));
+      for (const local of friends) {
+        if (known.has(local.id)) continue;
+        await addRemoteFriend(live, local);
+        remoteFriends.push(local);
+      }
+      friends = remoteFriends;
+      saveFriends(friends);
+      renderUsers();
+    } catch (err) {
+      toast(`Account sync failed: ${(err as Error).message}`, "error");
+    }
   }
 
   // live subscriptions (cleaned up when the screen unmounts)
@@ -420,6 +592,8 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
   if (!lines.length) push({ kind: "system", text: "Welcome to the lobby. Say hello.", ts: Date.now() });
   renderChat();
   renderUsers();
+  renderAccount();
+  if (session) void adoptAccount();
 
   return root;
 }

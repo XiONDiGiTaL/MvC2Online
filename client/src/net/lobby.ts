@@ -225,6 +225,33 @@ export class LobbyClient {
     if (this.joined) this.track();
   }
 
+  /**
+   * Presence is keyed by our session id. Signing in swaps that key for the
+   * account id so friends resolve on any device, which means the socket has to
+   * rejoin with the new key.
+   */
+  identifyAs(id: string) {
+    if (!id || id === this.selfId) return;
+    this.selfId = id;
+    this.users.delete(id);
+    this.users.set(id, {
+      id,
+      name: this.identity.name,
+      avatar: this.identity.avatar,
+      room: this.identity.room,
+      self: true,
+    });
+    this.emitUsers();
+    this.joined = false;
+    try {
+      this.ws?.close();
+    } catch {
+      /* already closed */
+    }
+    this.ws = null;
+    // onclose schedules the reconnect, which rejoins with the new key.
+  }
+
   setRoom(code: string | null) {
     if (this.identity.room === code) return;
     this.setIdentity({ room: code });
