@@ -182,8 +182,10 @@ touches the DOM, and it hands the match screen a `MatchConfig` plus, for online,
    `peer.ts` is the single place to add one.
 6. **Background tabs pause.** Browser `requestAnimationFrame` throttling means a hidden
    tab stops simulating; this is expected behaviour, not a bug to fix.
-7. **Deployment is documented, not performed.** Pages workflow and the Node server exist
-   and run locally; nothing is published.
+7. **Frontend is deployed, backend is not.** GitHub Pages serves the client at
+   `https://xiondigital.net/MvC2Online/` (verified in a browser). The signaling server has
+   only run locally, so online rooms on the public URL fail with an explicit connection
+   error rather than silently misbehaving.
 
 ---
 

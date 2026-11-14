@@ -4,8 +4,10 @@ A **browser-native 3v3 tag fighting game** built around Marvel vs. Capcom 2's ru
 with real rollback netcode, room codes and invite links. Two people open the page in
 two browsers, join the same room, pick three fighters each, and play.
 
-- **Live target:** https://xiondigital.net/MvC2Online
+- **Live (frontend deployed):** https://xiondigital.net/MvC2Online
 - **Repo:** https://github.com/XiONDiGiTaL/MvC2Online
+- **Online play:** needs the signaling server hosted — see §Deploy. Until then the live
+  URL supports Arcade, Local Versus, Training and the Gallery.
 
 ---
 
@@ -49,7 +51,8 @@ committed — `npm run verify:dat` enforces that.
 | Per-character frame data matching the arcade ROM | **Not implemented** | Characters share archetype frame templates with per-character stats and names. This is a deliberate, documented limit — see `docs/architecture.md` §8 |
 | Original character art / voices / music | **Not implemented** | Legal restriction; procedural visuals instead |
 | Matchmaking / ranked / spectating / replays | **Not implemented** | Direct room codes only |
-| Production deployment | **Not deployed** | Pages workflow + server deploy steps are committed but nothing is published; see §Deploy |
+| Frontend deployment | **Deployed & verified** | https://xiondigital.net/MvC2Online/ served by GitHub Pages (200 HTML + JS, 56-card gallery, no console errors) |
+| Multiplayer backend deployment | **Not deployed** | The room server runs locally; a public Node host (e.g. Railway) is still needed for online play on the live URL. See §Deploy |
 | True recompilation of the NAOMI binary | **Blocked** | Technical + legal; see investigation doc |
 
 Known limitation worth stating plainly: two *background* tabs will not simulate, because
@@ -144,15 +147,27 @@ Three ways, in priority order:
 
 Same-origin hosting needs no configuration at all.
 
+### What is actually live right now
+
+The **frontend is deployed** at https://xiondigital.net/MvC2Online/ (GitHub Pages,
+`build_type: workflow`, run green) and was checked in a browser: the app mounts, the
+dark theme applies, all six nav destinations render, the gallery lists all 56 fighters
+with 6 colour slots, and the console is clean.
+
+**Online play from that URL does not work yet**, because the signaling server is not
+hosted. Until it is, the Online screen fails with a clear “Could not reach the signaling
+server” error instead of pretending to connect. Hosting it is the one remaining step;
+afterwards set the endpoint in `client/public/config.json` (or **Settings → Signal
+server**) and redeploy.
+
+Local play (Arcade, Local Versus, Training, Gallery) works on the live URL today.
+
 ### Verification before claiming a deploy
 
 ```bash
 npm run build && npm run verify:dat
 # then: open the deployed URL in two browsers and confirm room join + a match.
 ```
-
-Nothing in this repository is published yet. The workflow and server are committed and
-tested locally; publishing requires the Pages setting above and a Railway service.
 
 ---
 
