@@ -25,7 +25,23 @@ window.__ikemenBootLog = [];
 
 	function fmtMB(n) { return (n / (1024 * 1024)).toFixed(1) + " MB"; }
 
+		// Archive location for our hosting layer: the Worker streams content.zip
+	// as chunk objects and stamps each slice immutable under this token, so
+	// hydrated files survive into the next visit. Falls back to the plain
+	// relative path on a static host that has no archive.txt.
+	async function archiveUrl() {
+		try {
+			const r = await fetch("archive.txt", { cache: "no-store" });
+			if (r.ok) {
+				const v = (await r.text()).trim();
+				if (v) return "content.zip?v=" + encodeURIComponent(v);
+			}
+		} catch (_) { /* optional: plain content.zip still works */ }
+		return "content.zip";
+	}
+
 	async function boot() {
+		const zipUrl = await archiveUrl();
 		const dlProgress = (loaded, total) => {
 			if (total > 0) {
 				setProgress(loaded / total);
@@ -41,13 +57,14 @@ window.__ikemenBootLog = [];
 		let mode = "eager";
 		if (new URLSearchParams(location.search).get("eager") === "1") {
 			setStatus("Downloading content…");
-			await mountZip("content.zip", "/ikemen", dlProgress);
+			await mountZip(zipUrl, "/ikemen", dlProgress);
 			console.log("fs: eager mode forced (?eager=1)");
 		} else {
 			setStatus("Fetching content index…");
-			const res = await mountZipIndex("content.zip", "/ikemen", { onProgress: dlProgress });
+			const res = await mountZipIndex(zipUrl, "/ikemen", { onProgress: dlProgress });
 			if (res.lazy) {
 				mode = "lazy";
+				try { sessionStorage.removeItem("mvc2.zipIndexReload"); } catch (e) { /* private mode */ }
 				console.log("fs: lazy index mounted, " + res.files + " files");
 				// Boot-critical prefixes, prefetched in parallel so boot is
 				// not a waterfall of tiny Range requests: data/ and font/

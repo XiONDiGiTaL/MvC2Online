@@ -707,20 +707,70 @@
 	const lazyState = { files: 0, hydrated: 0, bytes: 0, hydratedBytes: 0 };
 	globalThis.__fsLazyStats = lazyState;
 
+	// Hydrations are heavy (up to ~60 MB each), so a burst — six fighters plus a
+	// stage at match start — is capped: opening dozens of large range requests
+	// at once is what makes the odd one fail, and the engine can only report
+	// that as a bare "I/O error" on a fighter.
+	const HYDRATE_CONCURRENCY = 3;
+	let hydrateActive = 0;
+	const hydrateWaiters = [];
+
+	function withHydrateSlot(task) {
+		return new Promise((resolve, reject) => {
+			const run = () => {
+				hydrateActive++;
+				const settle = (fn) => (v) => { hydrateActive--; fn(v); drainHydrateQueue(); };
+				task().then(settle(resolve), settle(reject));
+			};
+			if (hydrateActive < HYDRATE_CONCURRENCY) run();
+			else hydrateWaiters.push(run);
+		});
+	}
+
+	function drainHydrateQueue() {
+		while (hydrateActive < HYDRATE_CONCURRENCY && hydrateWaiters.length) hydrateWaiters.shift()();
+	}
+
+	// A stale tab is the other way this bites: when a new pack is published the
+	// index it holds points at the wrong bytes, and the host answers the range
+	// request with the whole archive. Reloading once rebuilds the index.
+	const RELOAD_FLAG = "mvc2.zipIndexReload";
+	function reloadForFreshIndex() {
+		try {
+			if (sessionStorage.getItem(RELOAD_FLAG) === "1") return;
+			sessionStorage.setItem(RELOAD_FLAG, "1");
+		} catch (err) {
+			return;
+		}
+		location.reload();
+	}
+
 	async function fetchRange(url, start, end, ifRange) {
 		const headers = { "Range": "bytes=" + start + "-" + end };
 		if (ifRange) headers["If-Range"] = ifRange;
-		for (let attempt = 0; ; attempt++) {
+		let lastErr;
+		for (let attempt = 0; attempt < 3; attempt++) {
 			try {
 				const resp = await fetch(url, { headers });
+				if (resp.status === 200) {
+					// Range ignored or If-Range saw a new archive: either way our
+					// offsets are stale, so do not spend bandwidth on the whole file.
+					try { if (resp.body) await resp.body.cancel(); } catch (e) { /* ignore */ }
+					const err = new Error("zip: archive changed under this session");
+					err.archiveChanged = true;
+					throw err;
+				}
 				if (!resp.ok) throw new Error("fetch " + url + ": HTTP " + resp.status);
 				return { buf: new Uint8Array(await resp.arrayBuffer()), partial: resp.status === 206 };
 			} catch (err) {
-				// Retry once: a transient network failure would otherwise
-				// surface to the engine as EIO on open.
-				if (attempt >= 1) throw err;
+				// A transient network failure would otherwise surface to the engine
+				// as EIO on open, so give it two more tries before that happens.
+				if (err && err.archiveChanged) throw err;
+				lastErr = err;
+				if (attempt < 2) await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
 			}
 		}
+		throw lastErr;
 	}
 
 	// One in-flight hydration promise per node; concurrent opens share it.
@@ -728,7 +778,7 @@
 		if (!node.lazy) return Promise.resolve();
 		if (node.lazyFetch) return node.lazyFetch;
 		const l = node.lazy;
-		node.lazyFetch = (async () => {
+		node.lazyFetch = withHydrateSlot(async () => {
 			let data;
 			if (l.compSize === 0 && l.size === 0) {
 				data = new Uint8Array(0); // empty entry: no request needed
@@ -774,7 +824,10 @@
 				lazyState.hydrated++;
 				lazyState.hydratedBytes += l.compSize;
 			}
-		})();
+		}).catch((err) => {
+			if (err && err.archiveChanged) reloadForFreshIndex();
+			throw err;
+		});
 		node.lazyFetch.then(() => { delete node.lazyFetch; }, () => { delete node.lazyFetch; });
 		return node.lazyFetch;
 	}
@@ -794,6 +847,9 @@
 		hydrate(node, path).then(() => {
 			try { fn(); } catch (err) { callback(err); }
 		}, (err) => {
+			// Temporary diagnostics: the engine reports every hydrate failure as
+			// a bare I/O error, so log the real reason here.
+			console.error("[zip] hydrate failed for " + path + ": " + (err && err.message ? err.message : err));
 			if (!err.code) err.code = "EIO";
 			callback(err);
 		});
