@@ -82,6 +82,9 @@ export class RealtimeSignal implements SignalLike {
   private isHost = false;
   private joinTimer: number | null = null;
   private sawHost = false;
+  private queued = false;
+  private paired = false;
+  private queueMode = "casual";
 
   constructor(cfg: RealtimeConfig, name: string) {
     this.cfg = cfg;
@@ -199,8 +202,20 @@ export class RealtimeSignal implements SignalLike {
   private pendingJoin: (() => void) | null = null;
 
   private joinChannel(code: string): Promise<void> {
+    return this.openChannel(`realtime:${ROOM_PREFIX}${code}`, code);
+  }
+
+  /** Matchmaking inbox: presence tells us who else is searching. */
+  private joinQueue(mode: string): Promise<void> {
+    this.queued = true;
+    this.paired = false;
+    this.queueMode = mode;
+    return this.openChannel(`realtime:mvc2:queue:${mode}`, "");
+  }
+
+  private openChannel(fullTopic: string, code: string): Promise<void> {
     this.roomCode = code;
-    this.topic = `realtime:${ROOM_PREFIX}${code}`;
+    this.topic = fullTopic;
     return new Promise((resolve, reject) => {
       let settled = false;
       const timeout = window.setTimeout(() => {
@@ -256,6 +271,7 @@ export class RealtimeSignal implements SignalLike {
         }
       }
       this.syncSeats();
+      if (this.queued) this.checkQueue();
       return;
     }
 
@@ -278,6 +294,7 @@ export class RealtimeSignal implements SignalLike {
         this.emit({ t: "peer-left", id: key, name: gone?.name ?? val?.metas?.[0]?.name ?? "Opponent" });
       }
       this.syncSeats();
+      if (this.queued) this.checkQueue();
       return;
     }
 
@@ -322,10 +339,47 @@ export class RealtimeSignal implements SignalLike {
         return;
       }
 
+      if (kind === "pair" && this.queued && data?.to === this.selfId && data?.code) {
+        this.queued = false;
+        this.paired = true;
+        this.isHost = false;
+        this.seats.clear();
+        const code = String(data.code);
+        void this.openChannel(`realtime:${ROOM_PREFIX}${code}`, code).then(() => {
+          this.seats.set(this.selfId, { name: this.name, ready: false });
+          this.trackPresence();
+          this.emit({ t: "joined", code, selfId: this.selfId, room: this.roomState() });
+          this.broadcast("hello", { id: this.selfId, name: this.name });
+        });
+        return;
+      }
+
       if (kind === "bye" && !this.isHost) {
         this.emit({ t: "peer-left", id: data?.id ?? "", name: data?.name ?? "Opponent" });
       }
     }
+  }
+
+  /** First two players in the queue pair; the lower id hosts and opens a room. */
+  private checkQueue() {
+    if (!this.queued || this.paired) return;
+    const others = [...this.seats.keys()].filter((id) => id !== this.selfId).sort();
+    if (!others.length) return;
+    const other = others[0];
+    if (this.selfId > other) return; // the other side hosts
+    this.paired = true;
+    const code = makeRoomCode();
+    this.broadcast("pair", { to: other, code });
+    this.isHost = true;
+    this.hostId = this.selfId;
+    this.seats.clear();
+    void this.openChannel(`realtime:${ROOM_PREFIX}${code}`, code)
+      .then(() => {
+        this.seats.set(this.selfId, { name: this.name, ready: false });
+        this.trackPresence();
+        this.emit({ t: "created", code, selfId: this.selfId, room: this.roomState() });
+      })
+      .catch((err: Error) => this.emit({ t: "error", code: "queue", message: err.message }));
   }
 
   /** Host: publish the room after any membership or settings change. */
@@ -370,8 +424,16 @@ export class RealtimeSignal implements SignalLike {
       room?: { phase?: "lobby" | "select" | "match"; settings?: Record<string, unknown>; meta?: Record<string, unknown> };
     };
     switch (m.t) {
+      case "queue": {
+        const mode = (m as { mode?: string }).mode ?? "casual";
+        void this.joinQueue(mode).catch((err: Error) =>
+          this.emit({ t: "error", code: "queue", message: err.message })
+        );
+        break;
+      }
       case "create": {
         this.isHost = true;
+        this.queued = false;
         this.hostId = this.selfId;
         const code = makeRoomCode();
         void this.joinChannel(code)
@@ -439,6 +501,8 @@ export class RealtimeSignal implements SignalLike {
     this.heartbeat = null;
     if (this.joinTimer !== null) window.clearTimeout(this.joinTimer);
     this.roomCode = "";
+    this.queued = false;
+    this.paired = false;
     this.seats.clear();
     try {
       this.ws?.close();

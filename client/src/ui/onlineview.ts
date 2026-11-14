@@ -21,6 +21,8 @@ export class OnlineView {
   private joinCode = "";
   private lastPhase = "";
   private cleanup: (() => void) | null = null;
+  private searching = false;
+  private statsTimer: number | null = null;
 
   constructor(app: App) {
     this.app = app;
@@ -42,21 +44,56 @@ export class OnlineView {
   destroy() {
     this.match?.dispose();
     this.client?.leave();
+    this.stopStats();
     this.cleanup?.();
+  }
+
+  /** RTT refreshes on a timer so the lobby shows live connection quality. */
+  private ensureStats(room: RoomData | null) {
+    if (!room || room.phase !== "lobby" || this.client?.peer?.state !== "connected") {
+      this.stopStats();
+      return;
+    }
+    if (this.statsTimer !== null) return;
+    this.statsTimer = window.setInterval(() => {
+      if (!this.client?.room || this.client.room.phase !== "lobby") {
+        this.stopStats();
+        return;
+      }
+      this.render();
+    }, 1500);
+  }
+
+  private stopStats() {
+    if (this.statsTimer !== null) window.clearInterval(this.statsTimer);
+    this.statsTimer = null;
+  }
+
+  private connectionRow(): HTMLElement | null {
+    const peer = this.client?.peer;
+    if (!peer || peer.state !== "connected") return null;
+    const q = peer.quality();
+    const label = q === "unknown" ? "measuring…" : `${peer.rtt} ms · ${q.toUpperCase()}`;
+    return el("div", { class: "conn-row" },
+      el("span", { class: `dot ${q === "poor" ? "" : "on"}` }),
+      el("span", { class: "muted sm", text: `CONNECTION ${label}` }),
+      q === "poor" ? el("span", { class: "err sm", text: "High latency — expect rollbacks." }) : null
+    );
   }
 
   // --------------------------------------------------------- rendering
   private render() {
     this.root.replaceChildren();
     const room = this.client?.room ?? null;
+    this.ensureStats(room);
 
     if (this.match && room?.phase === "match") {
       this.root.append(this.match.element());
       return;
     }
     if (!this.client || !room) {
-      this.root.append(this.head("Online Multiplayer", "Create a room or join with a code. Inputs travel peer-to-peer."));
-      this.root.append(this.landing());
+      this.root.append(this.head("Online Multiplayer", "Find an opponent, create a room, or join with a code."));
+      this.root.append(this.searching ? this.searchingPanel() : this.landing());
     } else if (room.phase === "select") {
       this.root.append(this.head("Team Select", `Room ${room.code} · both players are picking.`));
       this.root.append(this.selectEl(room));
@@ -96,6 +133,23 @@ export class OnlineView {
       case "closed": return "PEER CLOSED";
       default: return "WAITING FOR PEER";
     }
+  }
+
+  private searchingPanel(): HTMLElement {
+    return el("div", { class: "online-body" },
+      el("div", { class: "panel center" },
+        el("h2", { text: "SEARCHING FOR AN OPPONENT" }),
+        el("p", { class: "muted", text: "You are in the casual queue. The next player who searches is paired with you automatically." }),
+        el("div", { class: "conn-row" }, el("span", { class: "dot" }), el("span", { class: "muted sm", text: "QUEUED" })),
+        this.error ? el("p", { class: "err", text: this.error }) : null,
+        button("Cancel search", "ghost", () => {
+          this.searching = false;
+          this.client?.cancelQueue();
+          this.client = null;
+          this.render();
+        })
+      )
+    );
   }
 
   private landing(): HTMLElement {
@@ -150,7 +204,21 @@ export class OnlineView {
       }, { attrs: { disabled: this.busy } })
     );
 
-    wrap.append(createCard, joinCard);
+    const quickCard = el("div", { class: "online-card" },
+      el("span", { class: "card-kicker", text: "QUICK MATCH" }),
+      el("h2", { text: "Find an opponent" }),
+      el("p", { class: "muted", text: "Casual match against the next player searching. No code to share — you drop straight into a lobby together." }),
+      button(this.busy ? "Working…" : "Find opponent", "primary lg", async () => {
+        await this.run(async () => {
+          this.client = new OnlineClient(this.hooks());
+          this.client.name = this.app.settings.name || "Player";
+          this.searching = true;
+          await this.client.quickMatch("casual");
+        });
+      }, { attrs: { disabled: this.busy } })
+    );
+
+    wrap.append(createCard, joinCard, quickCard);
 
     const info = el("div", { class: "online-info" },
       el("h3", { text: "How the connection works" }),
@@ -170,10 +238,12 @@ export class OnlineView {
       onRoom: (room: RoomData) => {
         this.busy = false;
         this.error = "";
+        this.searching = false;
         this.syncPhase(room);
       },
       onError: (message: string) => {
         this.busy = false;
+        this.searching = false;
         this.error = message;
         toast(message, "error");
         this.render();
@@ -250,7 +320,8 @@ export class OnlineView {
       el("div", { class: "conn-row" },
         el("span", { class: `dot ${this.peerState === "connected" ? "on" : ""}` }),
         el("span", { class: "muted sm", text: this.peerStatusText() + (this.peerDetail ? ` — ${this.peerDetail}` : "") })
-      )
+      ),
+      this.connectionRow()
     );
 
     const stageSel = el("select", { class: "input", attrs: { disabled: !isHost } });

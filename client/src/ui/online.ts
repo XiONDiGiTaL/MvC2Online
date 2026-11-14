@@ -94,6 +94,23 @@ export class OnlineClient {
     window.setTimeout(() => window.clearInterval(poll), 1000 * 60 * 60 * 4);
   }
 
+  /** Join the matchmaking queue; pairing happens on the queue channel. */
+  async quickMatch(mode: "casual" | "ranked" = "casual"): Promise<void> {
+    this.name = this.name || "Player";
+    const rt = await loadRealtimeConfig();
+    if (!rt) throw new Error("Quick Match needs the online service, which is not configured for this build.");
+    const sig = new RealtimeSignal(rt, this.name);
+    this.signal = sig;
+    sig.onMessage((m) => this.onSignal(m));
+    await sig.connect();
+    this.selfId = sig.selfId;
+    sig.send({ t: "queue", mode });
+  }
+
+  cancelQueue() {
+    this.leave();
+  }
+
   async createRoom(): Promise<void> {
     await this.connect(this.name);
     this.isHost = true;
