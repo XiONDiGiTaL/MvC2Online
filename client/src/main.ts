@@ -3,6 +3,7 @@ import { loadSettings, saveSettings, type App, type ScreenId } from "./app";
 import {
   homeScreen, arcadeScreen, localScreen, trainingScreen, galleryScreen,
   settingsScreen, onlineScreen, destroyOnline, resetLocal,
+  remoteScreen, destroyRemote,
 } from "./ui/screens";
 import { el, icon } from "./ui/dom";
 import { input } from "./game/input";
@@ -25,6 +26,7 @@ setSignalOverride(settings.signalUrl);
 const NAV: [ScreenId, string][] = [
   ["arcade", "Arcade"],
   ["online", "Online Multiplayer"],
+  ["remote", "Remote Play"],
   ["local", "Local Versus"],
   ["training", "Training"],
   ["gallery", "Character Gallery"],
@@ -84,6 +86,7 @@ const app: App = {
 function go(screen: ScreenId, params?: Record<string, unknown>) {
   void params;
   if (screen !== "online") destroyOnline();
+  if (screen !== "remote") destroyRemote();
   if (screen === "local") resetLocal();
   current = screen;
   mount(screen);
@@ -110,6 +113,7 @@ function mount(screen: ScreenId) {
   switch (screen) {
     case "arcade": node = arcadeScreen(app); break;
     case "online": node = onlineScreen(app); break;
+    case "remote": node = remoteScreen(app); break;
     case "local": node = localScreen(app); break;
     case "training": node = trainingScreen(app); break;
     case "gallery": node = galleryScreen(app); break;
@@ -125,7 +129,8 @@ updateNetPill();
 
 // Deep links: ?room=CODE opens the online screen with the code prefilled.
 const roomParam = new URLSearchParams(location.search).get("room");
-mount(roomParam ? "online" : "home");
+  const watchParam = new URLSearchParams(location.search).get("watch");
+  mount(watchParam ? "remote" : roomParam ? "online" : "home");
 if (roomParam) {
   view.prepend(
     el("div", { class: "deeplink-note" },

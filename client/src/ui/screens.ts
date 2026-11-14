@@ -5,6 +5,7 @@ import type { App } from "../app";
 import { CharSelect, emptyPick, portrait, type TeamPick } from "./charselect";
 import { MatchScreen } from "./match";
 import { OnlineView } from "./onlineview";
+import { RemoteView } from "./remoteview";
 import { button, copyText, el, icon, toast } from "./dom";
 import { ROSTER, COLORS_PER_CHAR, colorsFor, hex } from "../game/roster";
 import { movesFor, M } from "../game/engine";
@@ -513,6 +514,20 @@ export function onlineScreen(app: App): HTMLElement {
 export function destroyOnline() {
   onlineView?.destroy();
   onlineView = null;
+}
+
+// --------------------------------------------------------- remote play
+let remoteView: RemoteView | null = null;
+
+export function remoteScreen(app: App): HTMLElement {
+  if (!remoteView) remoteView = new RemoteView(app);
+  remoteView.attach(app);
+  return remoteView.element();
+}
+
+export function destroyRemote() {
+  remoteView?.destroy();
+  remoteView = null;
 }
 
 export function copyRoomCode(code: string) {

@@ -6,6 +6,7 @@ export type ScreenId =
   | "home"
   | "arcade"
   | "online"
+  | "remote"
   | "local"
   | "training"
   | "gallery"
