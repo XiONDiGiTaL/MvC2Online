@@ -1,0 +1,28 @@
+{
+  "name": "mvc2online",
+  "version": "0.3.0",
+  "private": true,
+  "description": "MvC2Online - browser-native 3v3 tag fighting game with rollback netcode, under the XION identity",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config client/vite.config.ts",
+    "build": "tsc -p client/tsconfig.json --noEmit && vite build --config client/vite.config.ts",
+    "preview": "vite preview --config client/vite.config.ts",
+    "server": "node server/index.mjs",
+    "start": "node server/index.mjs",
+    "typecheck": "tsc -p client/tsconfig.json --noEmit",
+    "test:netcode": "esbuild tests/netcode.test.ts --bundle --platform=node --format=esm --outfile=.tmp/netcode.test.mjs --log-level=warning && node .tmp/netcode.test.mjs",
+    "inspect:dat": "node scripts/inspect-dat.mjs",
+    "verify:dat": "node scripts/verify-dat.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.1.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

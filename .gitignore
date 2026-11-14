@@ -1,0 +1,37 @@
+# --- Proprietary game data (NEVER commit) ---
+*.dat
+*.zip
+*.7z
+*.chd
+*.gdi
+*.bin
+*.iso
+*.lnk
+!src/**/*.dat
+!data/**/*.example.dat
+
+# --- Local run artifacts ---
+.tmp/
+.logs/
+
+# --- Local tools ---
+/tools/
+REA.lnk
+ghidra.lnk
+
+# --- Node / build ---
+node_modules/
+dist/
+dist-server/
+*.log
+npm-debug.log*
+.vite/
+.DS_Store
+Thumbs.db
+
+# --- Local env / secrets ---
+.env
+.env.*
+!.env.example
+.vars
+.dev.vars
