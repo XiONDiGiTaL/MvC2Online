@@ -7,6 +7,7 @@ import { OnlineClient, type RoomData } from "./online";
 import { button, copyText, el, icon, toast } from "./dom";
 import type { PeerState } from "../net/peer";
 import { stageName } from "../game/render";
+import { AUTOJOIN_KEY, peekChallengeIntent } from "../net/invites";
 
 export class OnlineView {
   private root: HTMLElement;
@@ -35,6 +36,17 @@ export class OnlineView {
     this.app = app;
     (window as unknown as { __online?: OnlineView }).__online = this;
     if (!this.root.isConnected) this.render();
+
+    // Arrived from a lobby challenge: open a room so the invite has a code.
+    if (peekChallengeIntent()) void this.hostForChallenge();
+
+    // Arrived from accepting a challenge: go straight into their room.
+    const auto = sessionStorage.getItem(AUTOJOIN_KEY);
+    if (auto) {
+      sessionStorage.removeItem(AUTOJOIN_KEY);
+      this.joinCode = auto;
+      void this.joinFromInvite(auto);
+    }
   }
 
   element(): HTMLElement {
@@ -47,6 +59,23 @@ export class OnlineView {
     this.client?.leave();
     this.stopStats();
     this.cleanup?.();
+  }
+
+  /** Opened from a challenge: host straight away instead of asking for a press. */
+  private async hostForChallenge() {
+    await this.run(async () => {
+      this.client = new OnlineClient(this.hooks());
+      this.client.name = this.app.settings.name || "Host";
+      await this.client.createRoom();
+    });
+  }
+
+  private async joinFromInvite(code: string) {
+    await this.run(async () => {
+      this.client = new OnlineClient(this.hooks());
+      this.client.name = this.app.settings.name || "Guest";
+      await this.client.joinRoom(code);
+    });
   }
 
   /** RTT refreshes on a timer so the lobby shows live connection quality. */

@@ -1303,3 +1303,34 @@ kbd {
 .lb-acct-input:focus { outline: none; border-color: var(--blue-line); box-shadow: 0 0 0 3px var(--blue-soft); }
 .lb-acct-row { display: flex; gap: 6px; }
 .lb-acct-note { margin: 2px 0 0; font-size: 11px; line-height: 1.45; color: var(--muted-dim); }
+
+/* challenge banner: arrives on any screen */
+.invite-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  width: min(320px, calc(100vw - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--blue-line);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55);
+  animation: invite-in .22s ease-out;
+}
+@keyframes invite-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.invite-kicker {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--blue);
+}
+.invite-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.invite-code {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--muted);
+}
+.invite-actions { display: flex; gap: 8px; margin-top: 4px; }

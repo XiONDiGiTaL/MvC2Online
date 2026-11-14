@@ -8,6 +8,7 @@ import {
 import { el, icon } from "./ui/dom";
 import { loadProfile } from "./ui/profile";
 import { bindLobby, LobbyClient } from "./net/lobby";
+import { AUTOJOIN_KEY } from "./net/invites";
 import { input } from "./game/input";
 import { installAudioUnlock } from "./game/audio";
 import { setSignalOverride } from "./net/signal";
@@ -31,6 +32,47 @@ lobby.setIdentity({ name: profile.name, avatar: profile.avatar });
 bindLobby(lobby);
 void lobby.connect();
 window.addEventListener("pagehide", () => lobby.close());
+
+// Challenges arrive on the lobby channel from whichever screen the player is
+// on, so the accepting banner lives at app level rather than in the home UI.
+let inviteCard: HTMLElement | null = null;
+
+function dismissInvite() {
+  inviteCard?.remove();
+  inviteCard = null;
+}
+
+function showInvite(inv: { name: string; code: string }) {
+  dismissInvite();
+  const card = el("div", { class: "invite-card" },
+    el("span", { class: "invite-kicker", text: "CHALLENGE" }),
+    el("strong", { class: "invite-name", text: `${inv.name} wants a match` }),
+    el("span", { class: "invite-code", text: `ROOM ${inv.code}` }),
+    el("div", { class: "invite-actions" },
+      el("button", {
+        class: "lb-mini on",
+        text: "Accept",
+        on: {
+          click: () => {
+            sessionStorage.setItem(AUTOJOIN_KEY, inv.code);
+            dismissInvite();
+            location.assign(`?room=${encodeURIComponent(inv.code)}`);
+          },
+        },
+      }),
+      el("button", { class: "lb-mini", text: "Decline", on: { click: dismissInvite } })
+    )
+  );
+  inviteCard = card;
+  document.body.append(card);
+  window.setTimeout(() => {
+    if (inviteCard === card) dismissInvite();
+  }, 45_000);
+}
+
+lobby.on((e) => {
+  if (e.t === "invite") showInvite(e);
+});
 
 const NAV: [ScreenId, string][] = [
   ["arcade", "Arcade"],

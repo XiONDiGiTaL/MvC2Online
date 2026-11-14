@@ -32,7 +32,8 @@ export type LobbyEvent =
   | { t: "status"; status: "connecting" | "online" | "offline"; detail?: string }
   | { t: "users"; users: LobbyUser[] }
   | { t: "chat"; id: string; name: string; avatar: string; text: string; ts: number }
-  | { t: "system"; text: string };
+  | { t: "system"; text: string }
+  | { t: "invite"; from: string; name: string; code: string };
 
 type Handler = (e: LobbyEvent) => void;
 
@@ -48,6 +49,11 @@ export function bindLobby(client: LobbyClient | null) {
 /** Publish (or clear) the room code others can join from the lobby roster. */
 export function announceRoom(code: string | null) {
   activeLobby?.setRoom(code && code.trim() ? code.trim().toUpperCase() : null);
+}
+
+/** Challenge someone: point them at our room without them typing a code. */
+export function sendLobbyInvite(to: string, code: string): boolean {
+  return activeLobby?.sendInvite(to, code) ?? false;
 }
 
 interface PresenceMeta {
@@ -257,6 +263,26 @@ export class LobbyClient {
     this.setIdentity({ room: code });
   }
 
+  /**
+   * Target the invite at one presence key. Broadcast (not presence state), so
+   * nothing about it lingers after the recipient leaves.
+   */
+  sendInvite(to: string, code: string): boolean {
+    if (!to || !code || this.status !== "online") return false;
+    const room = code.trim().toUpperCase();
+    this.raw({
+      topic: TOPIC,
+      event: "broadcast",
+      payload: {
+        type: "broadcast",
+        event: "invite",
+        payload: { to, code: room, from: this.selfId, name: this.identity.name },
+      },
+      ref: this.nextRef(),
+    });
+    return true;
+  }
+
   /** Returns false when throttled or empty, so the UI can keep the draft. */
   sendChat(text: string): boolean {
     const clean = text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, CHAT_MAX);
@@ -320,6 +346,18 @@ export class LobbyClient {
         this.users.delete(key);
       }
       this.emitUsers();
+      return;
+    }
+
+    if (ev === "broadcast" && p?.event === "invite") {
+      const d = p.payload as { to?: string; from?: string; name?: string; code?: string } | undefined;
+      if (!d?.to || d.to !== this.selfId || !d.code) return;
+      this.emit({
+        t: "invite",
+        from: String(d.from ?? ""),
+        name: String(d.name ?? "A player").slice(0, 24),
+        code: String(d.code).toUpperCase().slice(0, 8),
+      });
       return;
     }
 

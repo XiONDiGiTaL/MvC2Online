@@ -9,6 +9,7 @@ import { RollbackSession } from "../net/rollback";
 import { SignalClient, resolveSignalUrl, type RoomState, type SignalMessage, type SignalLike } from "../net/signal";
 import { RealtimeSignal, loadRealtimeConfig } from "../net/signal-rt";
 import { announceRoom } from "../net/lobby";
+import { flushChallengeInvite } from "../net/invites";
 import { createState } from "../game/engine";
 import { input } from "../game/input";
 import type { MatchConfig } from "../game/types";
@@ -132,6 +133,9 @@ export class OnlineClient {
         this.setRoom(m.room as RoomData, true);
         // Advertise the room so the lobby roster can offer Join.
         announceRoom((m as { code?: string }).code ?? null);
+        // If this room exists because we challenged someone, tell them now
+        // that there is a code to join.
+        flushChallengeInvite((m as { code?: string }).code ?? "");
         break;
       }
       case "joined": {

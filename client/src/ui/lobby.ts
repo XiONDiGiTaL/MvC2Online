@@ -9,6 +9,8 @@
 import type { App } from "../app";
 import { button, el, icon, toast } from "./dom";
 import { avatarFromFile, saveProfile } from "./profile";
+import { queueChallenge } from "../net/invites";
+import { sendLobbyInvite } from "../net/lobby";
 import {
   addRemoteFriend, ensureSession, fetchRemoteFriends, fetchRemoteProfile,
   loadSession, pushRemoteProfile, removeRemoteFriend, signIn, signOut, signUp,
@@ -360,6 +362,12 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
                 })
               : null,
             el("button", {
+              class: "lb-mini",
+              text: "Duel",
+              title: `Challenge ${u.name}`,
+              on: { click: () => challenge(u) },
+            }),
+            el("button", {
               class: "lb-mini lb-add" + (isFriend ? " on" : ""),
               text: isFriend ? "✓" : "+",
               title: isFriend ? "Remove friend" : "Add friend",
@@ -391,6 +399,14 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
           live?.room
             ? el("button", { class: "lb-mini on", text: "Join", on: { click: () => joinRoom(live.room as string) } })
             : null,
+          live
+            ? el("button", {
+                class: "lb-mini",
+                text: "Duel",
+                title: `Challenge ${f.name}`,
+                on: { click: () => challenge(f) },
+              })
+            : null,
           el("button", {
             class: "lb-mini lb-add on",
             text: "✕",
@@ -419,6 +435,22 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
     const counter = right.querySelectorAll(".lb-count")[0] as HTMLElement;
     if (counter) counter.textContent = String(friends.length);
     renderUsers();
+  }
+
+  /**
+   * One press sends a challenge. If we already have a room, invite straight
+   * away; otherwise open one and the invite follows the moment it has a code.
+   */
+  function challenge(target: { id: string; name: string }) {
+    const room = app.lobby?.identity.room;
+    if (room) {
+      if (sendLobbyInvite(target.id, room)) toast(`Invited ${target.name} to room ${room}`, "ok");
+      else toast("Invite could not be sent — try again in a moment", "error");
+      return;
+    }
+    queueChallenge(target);
+    toast(`Opening a room for ${target.name}…`, "info");
+    app.go("online");
   }
 
   function removeFriend(id: string) {
