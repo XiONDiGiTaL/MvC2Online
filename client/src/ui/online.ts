@@ -8,7 +8,7 @@ import { RtcPeer, type PeerState } from "../net/peer";
 import { RollbackSession } from "../net/rollback";
 import { SignalClient, resolveSignalUrl, type RoomState, type SignalMessage, type SignalLike } from "../net/signal";
 import { RealtimeSignal, loadRealtimeConfig } from "../net/signal-rt";
-import { announceRoom } from "../net/lobby";
+import { announceBusy, announceRoom } from "../net/lobby";
 import { flushChallengeInvite } from "../net/invites";
 import { createState } from "../game/engine";
 import { input } from "../game/input";
@@ -182,6 +182,9 @@ export class OnlineClient {
     this.hooks.onRoom(room);
     if (!initial && room.phase !== prevPhase) this.hooks.onPhase(room.phase);
     if (initial) this.hooks.onPhase(room.phase);
+    // Team select and the match itself count as unavailable: the roster marks
+    // us busy and challenges are held off rather than interrupting a fight.
+    announceBusy(room.phase !== "lobby");
 
     // Host drives the phase machine: once both teams are locked, launch.
     if (this.isHost && room.phase === "select") this.maybeLaunch();
@@ -328,6 +331,7 @@ export class OnlineClient {
   leave() {
     this.signal?.send({ t: "leave" });
     announceRoom(null);
+    announceBusy(false);
     this.closePeer();
     this.signal?.close();
     this.signal = null;

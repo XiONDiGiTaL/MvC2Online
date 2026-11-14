@@ -1334,3 +1334,10 @@ kbd {
   font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--muted);
 }
 .invite-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+/* a challenge that arrived while we were fighting */
+.invite-card.busy { border-color: var(--line-strong); }
+.invite-card.busy .invite-kicker { color: var(--muted-dim); }
+.invite-card.busy .invite-code { color: var(--muted-dim); letter-spacing: .04em; }
+/* unavailable players: the action is shown but inert */
+.lb-mini:disabled { opacity: .35; cursor: not-allowed; }

@@ -44,6 +44,22 @@ function dismissInvite() {
 
 function showInvite(inv: { name: string; code: string }) {
   dismissInvite();
+
+  // A fight in progress wins over a challenge: acknowledge it and move on
+  // rather than offering a button that would drop the player out of a match.
+  if (lobby.identity.busy) {
+    const notice = el("div", { class: "invite-card busy" },
+      el("span", { class: "invite-kicker", text: "CHALLENGE" }),
+      el("strong", { class: "invite-name", text: `${inv.name} wants a match` }),
+      el("span", { class: "invite-code", text: "You are in a match — challenge missed" })
+    );
+    inviteCard = notice;
+    document.body.append(notice);
+    window.setTimeout(() => {
+      if (inviteCard === notice) dismissInvite();
+    }, 6000);
+    return;
+  }
   const card = el("div", { class: "invite-card" },
     el("span", { class: "invite-kicker", text: "CHALLENGE" }),
     el("strong", { class: "invite-name", text: `${inv.name} wants a match` }),

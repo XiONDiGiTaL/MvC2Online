@@ -352,7 +352,7 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
             avatarNode(u.avatar, u.name, 32),
             el("div", { class: "lb-user-meta" },
               el("strong", { text: u.name }),
-              el("span", { class: "lb-user-sub", text: u.room ? `Room ${u.room}` : "In the lobby" })
+              el("span", { class: "lb-user-sub", text: u.busy ? "In a match" : u.room ? `Room ${u.room}` : "In the lobby" })
             ),
             u.room
               ? el("button", {
@@ -364,8 +364,9 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
             el("button", {
               class: "lb-mini",
               text: "Duel",
-              title: `Challenge ${u.name}`,
-              on: { click: () => challenge(u) },
+              title: u.busy ? `${u.name} is in a match` : `Challenge ${u.name}`,
+              attrs: u.busy ? { disabled: "" } : {},
+              on: { click: () => { if (!u.busy) challenge(u); } },
             }),
             el("button", {
               class: "lb-mini lb-add" + (isFriend ? " on" : ""),
@@ -394,7 +395,10 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
           avatarNode(live?.avatar ?? "", f.name, 32),
           el("div", { class: "lb-user-meta" },
             el("strong", { text: f.name }),
-            el("span", { class: "lb-user-sub", text: live ? (live.room ? `Room ${live.room}` : "Online") : "Offline" })
+            el("span", {
+              class: "lb-user-sub",
+              text: live ? (live.busy ? "In a match" : live.room ? `Room ${live.room}` : "Online") : "Offline",
+            })
           ),
           live?.room
             ? el("button", { class: "lb-mini on", text: "Join", on: { click: () => joinRoom(live.room as string) } })
@@ -403,8 +407,9 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
             ? el("button", {
                 class: "lb-mini",
                 text: "Duel",
-                title: `Challenge ${f.name}`,
-                on: { click: () => challenge(f) },
+                title: live.busy ? `${f.name} is in a match` : `Challenge ${f.name}`,
+                attrs: live.busy ? { disabled: "" } : {},
+                on: { click: () => { if (!live.busy) challenge(f); } },
               })
             : null,
           el("button", {
@@ -618,7 +623,7 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
     }));
     users = [];
     const self = app.lobby.identity;
-    users.push({ id: app.lobby.selfId, name: self.name, avatar: self.avatar, room: self.room, self: true });
+    users.push({ id: app.lobby.selfId, name: self.name, avatar: self.avatar, room: self.room, busy: self.busy, self: true });
   }
 
   if (!lines.length) push({ kind: "system", text: "Welcome to the lobby. Say hello.", ts: Date.now() });

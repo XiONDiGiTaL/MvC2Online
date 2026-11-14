@@ -18,6 +18,8 @@ export interface LobbyIdentity {
   avatar: string;
   /** open room code, so others can join straight from the roster */
   room: string | null;
+  /** in team select or a match: inviteable, but not interruptible */
+  busy: boolean;
 }
 
 export interface LobbyUser {
@@ -25,6 +27,8 @@ export interface LobbyUser {
   name: string;
   avatar: string;
   room: string | null;
+  /** locked into a team-select or a match: not available to challenge */
+  busy: boolean;
   self: boolean;
 }
 
@@ -56,15 +60,24 @@ export function sendLobbyInvite(to: string, code: string): boolean {
   return activeLobby?.sendInvite(to, code) ?? false;
 }
 
+/**
+ * Mark ourselves unavailable (team select / mid-match) so the roster shows it
+ * and nobody wastes a challenge on us.
+ */
+export function announceBusy(busy: boolean) {
+  activeLobby?.setBusy(busy);
+}
+
 interface PresenceMeta {
   name?: string;
   avatar?: string;
   room?: string | null;
+  busy?: boolean;
 }
 
 export class LobbyClient {
   selfId = makeId();
-  identity: LobbyIdentity = { name: "Player", avatar: "", room: null };
+  identity: LobbyIdentity = { name: "Player", avatar: "", room: null, busy: false };
   status: "connecting" | "online" | "offline" = "offline";
 
   private cfg: RealtimeConfig | null = null;
@@ -211,6 +224,7 @@ export class LobbyClient {
           name: this.identity.name,
           avatar: this.identity.avatar,
           room: this.identity.room,
+          busy: this.identity.busy === true,
         },
       },
       ref: this.nextRef(),
@@ -225,6 +239,7 @@ export class LobbyClient {
       name: this.identity.name,
       avatar: this.identity.avatar,
       room: this.identity.room,
+      busy: this.identity.busy === true,
       self: true,
     });
     this.emitUsers();
@@ -245,6 +260,7 @@ export class LobbyClient {
       name: this.identity.name,
       avatar: this.identity.avatar,
       room: this.identity.room,
+      busy: this.identity.busy === true,
       self: true,
     });
     this.emitUsers();
@@ -261,6 +277,11 @@ export class LobbyClient {
   setRoom(code: string | null) {
     if (this.identity.room === code) return;
     this.setIdentity({ room: code });
+  }
+
+  setBusy(busy: boolean) {
+    if (this.identity.busy === busy) return;
+    this.setIdentity({ busy });
   }
 
   /**
@@ -385,6 +406,7 @@ export class LobbyClient {
       name: String(meta.name ?? "Player").slice(0, 24),
       avatar: String(meta.avatar ?? ""),
       room: meta.room ? String(meta.room) : null,
+      busy: meta.busy === true,
       self: false,
     });
     if (fresh) this.emit({ t: "system", text: `${meta.name ?? "Player"} joined` });
@@ -396,6 +418,7 @@ export class LobbyClient {
       name: this.identity.name,
       avatar: this.identity.avatar,
       room: this.identity.room,
+      busy: this.identity.busy === true,
       self: true,
     });
   }
