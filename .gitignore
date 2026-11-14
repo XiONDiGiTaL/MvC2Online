@@ -6,6 +6,9 @@
 *.gdi
 *.bin
 *.iso
+*.cue
+*.mdf
+*.mds
 *.lnk
 !src/**/*.dat
 !data/**/*.example.dat
