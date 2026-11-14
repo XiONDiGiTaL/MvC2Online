@@ -1,0 +1,20 @@
+{
+  // The Ikemen GO cabinet in the browser: static shell + R2-streamed content.
+  // Deploy with: npx wrangler deploy --config deploy/ikemen/wrangler.jsonc
+  "name": "mvc2-ikemen",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // These two must hit the Worker so they get Range support instead of the
+    // asset handler's "200 + whole file".
+    "run_worker_first": ["/content.zip", "/ikemen.wasm"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "CONTENT",
+      "bucket_name": "mvc2-ikemen"
+    }
+  ]
+}

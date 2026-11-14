@@ -65,3 +65,6 @@ Thumbs.db
 /Ikemen/data/*.sff
 /Ikemen/data/*.snd
 /Ikemen/data/*.orig
+
+# wrangler local state
+.wrangler/
