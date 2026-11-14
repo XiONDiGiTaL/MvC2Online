@@ -6,6 +6,8 @@ import {
   remoteScreen, destroyRemote,
 } from "./ui/screens";
 import { el, icon } from "./ui/dom";
+import { loadProfile } from "./ui/profile";
+import { bindLobby, LobbyClient } from "./net/lobby";
 import { input } from "./game/input";
 import { installAudioUnlock } from "./game/audio";
 import { setSignalOverride } from "./net/signal";
@@ -17,11 +19,18 @@ if (!root) throw new Error("#app missing from index.html");
 installAudioUnlock();
 
 const settings = loadSettings();
-if (!settings.name) {
-  settings.name = "Player" + String(Math.floor(Math.random() * 900) + 100);
-}
+// The profile is the source of truth for the name: it survives reloads, while
+// settings only mirror it for the match HUD.
+const profile = loadProfile();
+settings.name = profile.name;
 saveSettings(settings);
 setSignalOverride(settings.signalUrl);
+
+const lobby = new LobbyClient();
+lobby.setIdentity({ name: profile.name, avatar: profile.avatar });
+bindLobby(lobby);
+void lobby.connect();
+window.addEventListener("pagehide", () => lobby.close());
 
 const NAV: [ScreenId, string][] = [
   ["arcade", "Arcade"],
@@ -66,10 +75,28 @@ const footer = el("footer", { class: "site-foot" },
 
 root.append(nav, view, footer);
 
+const cleanups: (() => void)[] = [];
+
+function runCleanups() {
+  while (cleanups.length) {
+    const fn = cleanups.pop();
+    try {
+      fn?.();
+    } catch (err) {
+      console.error("[mvc2online] screen cleanup threw", err);
+    }
+  }
+}
+
 const app: App = {
   root: view,
   settings,
+  profile,
+  lobby,
   history: [],
+  onCleanup(fn) {
+    cleanups.push(fn);
+  },
   persist() {
     saveSettings(settings);
     setSignalOverride(settings.signalUrl);
@@ -103,6 +130,7 @@ function updateNetPill() {
 }
 
 function mount(screen: ScreenId) {
+  runCleanups();
   input.enabled = false;
   input.onEscape = null;
   document.body.classList.remove("in-match");

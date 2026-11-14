@@ -1,0 +1,351 @@
+// Global lobby: who is on the site right now, plus the shared chat.
+//
+// This is the same Phoenix-protocol socket the room signaling uses, joined to
+// one long-lived topic so presence survives navigation. Nothing here touches
+// gameplay: the lobby carries membership and text only, and chat is broadcast
+// (ephemeral by design — no moderation surface, nothing stored).
+
+import { loadRealtimeConfig, makeId, type RealtimeConfig } from "./signal-rt";
+
+const HEARTBEAT_MS = 25_000;
+const CHAT_MAX = 240;
+const CHAT_COOLDOWN_MS = 700;
+const TOPIC = "realtime:mvc2:lobby";
+
+export interface LobbyIdentity {
+  name: string;
+  /** portrait key (`@portrait:12`) or an uploaded data URL */
+  avatar: string;
+  /** open room code, so others can join straight from the roster */
+  room: string | null;
+}
+
+export interface LobbyUser {
+  id: string;
+  name: string;
+  avatar: string;
+  room: string | null;
+  self: boolean;
+}
+
+export type LobbyEvent =
+  | { t: "status"; status: "connecting" | "online" | "offline"; detail?: string }
+  | { t: "users"; users: LobbyUser[] }
+  | { t: "chat"; id: string; name: string; avatar: string; text: string; ts: number }
+  | { t: "system"; text: string };
+
+type Handler = (e: LobbyEvent) => void;
+
+// The live lobby is created at boot; the room layer is built later and deeper
+// in the tree, so it announces its room through this binding instead of
+// threading a reference through every screen.
+let activeLobby: LobbyClient | null = null;
+
+export function bindLobby(client: LobbyClient | null) {
+  activeLobby = client;
+}
+
+/** Publish (or clear) the room code others can join from the lobby roster. */
+export function announceRoom(code: string | null) {
+  activeLobby?.setRoom(code && code.trim() ? code.trim().toUpperCase() : null);
+}
+
+interface PresenceMeta {
+  name?: string;
+  avatar?: string;
+  room?: string | null;
+}
+
+export class LobbyClient {
+  selfId = makeId();
+  identity: LobbyIdentity = { name: "Player", avatar: "", room: null };
+  status: "connecting" | "online" | "offline" = "offline";
+
+  private cfg: RealtimeConfig | null = null;
+  private ws: WebSocket | null = null;
+  private ref = 0;
+  private joined = false;
+  private handlers = new Set<Handler>();
+  private users = new Map<string, LobbyUser>();
+  private heartbeat: number | null = null;
+  private retry = 0;
+  private retryTimer: number | null = null;
+  private lastChatAt = 0;
+  private closing = false;
+
+  on(fn: Handler): () => void {
+    this.handlers.add(fn);
+    return () => this.handlers.delete(fn);
+  }
+
+  private emit(e: LobbyEvent) {
+    for (const h of this.handlers) {
+      try {
+        h(e);
+      } catch (err) {
+        console.error("[lobby] handler threw", err);
+      }
+    }
+  }
+
+  private setStatus(status: "connecting" | "online" | "offline", detail?: string) {
+    this.status = status;
+    this.emit({ t: "status", status, detail });
+  }
+
+  private emitUsers() {
+    const users = [...this.users.values()].sort((a, b) => {
+      if (a.self !== b.self) return a.self ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    this.emit({ t: "users", users });
+  }
+
+  async connect(): Promise<void> {
+    this.cfg = await loadRealtimeConfig();
+    if (!this.cfg) {
+      this.setStatus("offline", "No lobby configured");
+      return;
+    }
+    this.open();
+  }
+
+  private open() {
+    if (!this.cfg || this.closing) return;
+    const { url, key } = this.cfg;
+    const endpoint =
+      `${url.replace(/^http/, "ws")}/realtime/v1/websocket` +
+      `?apikey=${encodeURIComponent(key)}&vsn=1.0.0`;
+    this.setStatus("connecting");
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(endpoint);
+    } catch {
+      this.setStatus("offline", "Could not open the lobby socket");
+      this.scheduleRetry();
+      return;
+    }
+    this.ws = ws;
+
+    ws.onopen = () => {
+      this.retry = 0;
+      this.join();
+      if (this.heartbeat === null) {
+        this.heartbeat = window.setInterval(() => {
+          this.raw({ topic: "phoenix", event: "heartbeat", payload: {}, ref: this.nextRef() });
+        }, HEARTBEAT_MS);
+      }
+    };
+
+    ws.onclose = () => {
+      this.joined = false;
+      if (this.heartbeat !== null) {
+        window.clearInterval(this.heartbeat);
+        this.heartbeat = null;
+      }
+      this.users.clear();
+      this.emitUsers();
+      this.setStatus("offline");
+      this.scheduleRetry();
+    };
+
+    ws.onerror = () => {
+      if (!this.joined) this.setStatus("offline", "Lobby unreachable");
+    };
+
+    ws.onmessage = (ev) => {
+      let msg: { event?: string; ref?: string; payload?: any };
+      try {
+        msg = JSON.parse(String(ev.data));
+      } catch {
+        return;
+      }
+      this.receive(msg);
+    };
+  }
+
+  private scheduleRetry() {
+    // A site-wide lobby should come back on its own after a flaky moment.
+    if (this.closing || this.retryTimer !== null) return;
+    const delay = Math.min(30_000, 1500 * 2 ** this.retry);
+    this.retry += 1;
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = null;
+      this.open();
+    }, delay);
+  }
+
+  private nextRef() {
+    this.ref += 1;
+    return String(this.ref);
+  }
+
+  private raw(obj: unknown) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj));
+  }
+
+  private join() {
+    this.joined = true;
+    this.raw({
+      topic: TOPIC,
+      event: "phx_join",
+      payload: { config: { broadcast: { self: false }, presence: { key: this.selfId } } },
+      ref: this.nextRef(),
+    });
+  }
+
+  private track() {
+    this.raw({
+      topic: TOPIC,
+      event: "presence",
+      payload: {
+        type: "presence",
+        event: "track",
+        payload: {
+          name: this.identity.name,
+          avatar: this.identity.avatar,
+          room: this.identity.room,
+        },
+      },
+      ref: this.nextRef(),
+    });
+  }
+
+  /** Profile or room change: re-track so everyone sees it immediately. */
+  setIdentity(patch: Partial<LobbyIdentity>) {
+    this.identity = { ...this.identity, ...patch };
+    this.users.set(this.selfId, {
+      id: this.selfId,
+      name: this.identity.name,
+      avatar: this.identity.avatar,
+      room: this.identity.room,
+      self: true,
+    });
+    this.emitUsers();
+    if (this.joined) this.track();
+  }
+
+  setRoom(code: string | null) {
+    if (this.identity.room === code) return;
+    this.setIdentity({ room: code });
+  }
+
+  /** Returns false when throttled or empty, so the UI can keep the draft. */
+  sendChat(text: string): boolean {
+    const clean = text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, CHAT_MAX);
+    if (!clean) return false;
+    const now = Date.now();
+    if (now - this.lastChatAt < CHAT_COOLDOWN_MS) return false;
+    this.lastChatAt = now;
+    this.raw({
+      topic: TOPIC,
+      event: "broadcast",
+      payload: {
+        type: "broadcast",
+        event: "chat",
+        payload: { from: this.selfId, name: this.identity.name, avatar: this.identity.avatar, text: clean },
+      },
+      ref: this.nextRef(),
+    });
+    // Broadcast is self:false, so echo locally instead of waiting for a round trip.
+    this.emit({
+      t: "chat",
+      id: this.selfId,
+      name: this.identity.name,
+      avatar: this.identity.avatar,
+      text: clean,
+      ts: now,
+    });
+    return true;
+  }
+
+  private receive(msg: { event?: string; ref?: string; payload?: any }) {
+    const ev = msg.event;
+    const p = msg.payload;
+
+    if (ev === "phx_reply") {
+      if (p?.status === "ok" && this.joined && this.status !== "online") {
+        this.setStatus("online");
+        this.track();
+      } else if (p?.status && p.status !== "ok") {
+        this.setStatus("offline", p?.response?.reason ? String(p.response.reason) : "Lobby rejected the join");
+      }
+      return;
+    }
+
+    if (ev === "presence_state") {
+      this.users.clear();
+      for (const [key, val] of Object.entries(p ?? {})) {
+        this.absorb(key, (val as { metas?: PresenceMeta[] })?.metas?.[0]);
+      }
+      this.seedSelf();
+      this.emitUsers();
+      return;
+    }
+
+    if (ev === "presence_diff") {
+      const joins = (p?.joins ?? {}) as Record<string, { metas?: PresenceMeta[] }>;
+      const leaves = (p?.leaves ?? {}) as Record<string, { metas?: PresenceMeta[] }>;
+      for (const [key, val] of Object.entries(joins)) this.absorb(key, val?.metas?.[0]);
+      for (const key of Object.keys(leaves)) {
+        const gone = this.users.get(key);
+        if (gone && !gone.self) this.emit({ t: "system", text: `${gone.name} left` });
+        this.users.delete(key);
+      }
+      this.emitUsers();
+      return;
+    }
+
+    if (ev === "broadcast" && p?.event === "chat") {
+      const d = p.payload as { from?: string; name?: string; avatar?: string; text?: string } | undefined;
+      if (!d?.from || d.from === this.selfId) return; // own messages were echoed locally
+      const text = String(d.text ?? "").slice(0, CHAT_MAX);
+      if (!text) return;
+      this.emit({
+        t: "chat",
+        id: d.from,
+        name: String(d.name ?? "Player").slice(0, 24),
+        avatar: String(d.avatar ?? ""),
+        text,
+        ts: Date.now(),
+      });
+    }
+  }
+
+  private absorb(key: string, meta: PresenceMeta | undefined) {
+    if (!meta || key === this.selfId) return;
+    const fresh = !this.users.has(key);
+    this.users.set(key, {
+      id: key,
+      name: String(meta.name ?? "Player").slice(0, 24),
+      avatar: String(meta.avatar ?? ""),
+      room: meta.room ? String(meta.room) : null,
+      self: false,
+    });
+    if (fresh) this.emit({ t: "system", text: `${meta.name ?? "Player"} joined` });
+  }
+
+  private seedSelf() {
+    this.users.set(this.selfId, {
+      id: this.selfId,
+      name: this.identity.name,
+      avatar: this.identity.avatar,
+      room: this.identity.room,
+      self: true,
+    });
+  }
+
+  close() {
+    this.closing = true;
+    if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
+    this.heartbeat = null;
+    if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    try {
+      this.ws?.close();
+    } catch {
+      /* already gone */
+    }
+    this.ws = null;
+  }
+}

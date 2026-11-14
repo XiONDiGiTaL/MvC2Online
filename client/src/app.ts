@@ -1,6 +1,8 @@
 // App-level types and persisted settings.
 
 import { P1_KEYS, P2_KEYS, type KeyMap } from "./game/input";
+import type { Profile } from "./ui/profile";
+import type { LobbyClient } from "./net/lobby";
 
 export type ScreenId =
   | "home"
@@ -66,6 +68,12 @@ export function saveSettings(s: Settings) {
 export interface App {
   root: HTMLElement;
   settings: Settings;
+  /** device-owned identity: username, avatar, stable id */
+  profile: Profile;
+  /** global presence + chat; null when no realtime config ships */
+  lobby: LobbyClient | null;
+  /** runs when the current screen is replaced */
+  onCleanup(fn: () => void): void;
   persist(): void;
   go(screen: ScreenId, params?: Record<string, unknown>): void;
   /** Replace the viewport with a full-bleed node (used by match screens). */

@@ -7,6 +7,7 @@ import { MatchScreen } from "./match";
 import { OnlineView } from "./onlineview";
 import { RemoteView } from "./remoteview";
 import { button, copyText, el, icon, toast } from "./dom";
+import { homeLobby, type LobbyAction } from "./lobby";
 import { ROSTER, COLORS_PER_CHAR, colorsFor, hex } from "../game/roster";
 import { movesFor, M } from "../game/engine";
 import { input, keyLabel, ACTION_LABELS, P1_KEYS, P2_KEYS, type KeyMap } from "../game/input";
@@ -66,25 +67,23 @@ export function homeScreen(app: App): HTMLElement {
   );
   body.append(hero);
 
-  const modes = el("div", { class: "mode-grid" });
-  const modeDefs: [string, string, string, () => void][] = [
-    ["Online Multiplayer", "Room codes, invite links, rollback netcode over WebRTC.", "net", () => app.go("online")],
-    ["Arcade", `Six-stage ladder against the CPU. Difficulty ramps each fight.`, "play", () => { resetArcade(); app.go("arcade"); }],
-    ["Local Versus", "Two players, one keyboard or two gamepads.", "users", () => app.go("local")],
-    ["Training", "Dummy behaviour, resets, frame data. Build your combos.", "reset", () => app.go("training")],
-    ["Character Gallery", "All 56 fighters, every colour slot, stats and specials.", "lock", () => app.go("gallery")],
-    ["Settings", "Remap keys, pick the signal server, tune match rules.", "pad", () => app.go("settings")]
+  const actions: LobbyAction[] = [
+    { label: "Online Battle", hint: "Room codes, rollback netcode, no install", icon: "net",
+      run: () => app.go("online") },
+    { label: "Arcade", hint: "Six-stage ladder, difficulty ramps each fight", icon: "play",
+      run: () => { resetArcade(); app.go("arcade"); } },
+    { label: "Remote Play", hint: "Watch and drive a cabinet someone else hosts", icon: "pad",
+      run: () => app.go("remote") },
+    { label: "Local Versus", hint: "Two players, one keyboard or two gamepads", icon: "users",
+      run: () => app.go("local") },
+    { label: "Training", hint: "Dummy behaviour, resets, frame data", icon: "reset",
+      run: () => app.go("training") },
+    { label: "Character Gallery", hint: "All 56 fighters, every colour slot", icon: "lock",
+      run: () => app.go("gallery") },
+    { label: "Controls & Settings", hint: "Remap keys, match rules, signal server", icon: "pad",
+      run: () => app.go("settings") }
   ];
-  for (const [name, desc, ico, go] of modeDefs) {
-    modes.append(
-      el("button", { class: "mode-card", on: { click: go } },
-        el("span", { class: "mode-ico" }, icon(ico)),
-        el("span", { class: "mode-name", text: name }),
-        el("span", { class: "mode-desc", text: desc })
-      )
-    );
-  }
-  body.append(modes);
+  body.append(homeLobby(app, actions));
 
   const controls = el("div", { class: "home-controls" },
     el("h3", { text: "Default controls" }),

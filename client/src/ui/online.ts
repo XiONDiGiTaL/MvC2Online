@@ -8,6 +8,7 @@ import { RtcPeer, type PeerState } from "../net/peer";
 import { RollbackSession } from "../net/rollback";
 import { SignalClient, resolveSignalUrl, type RoomState, type SignalMessage, type SignalLike } from "../net/signal";
 import { RealtimeSignal, loadRealtimeConfig } from "../net/signal-rt";
+import { announceRoom } from "../net/lobby";
 import { createState } from "../game/engine";
 import { input } from "../game/input";
 import type { MatchConfig } from "../game/types";
@@ -129,12 +130,15 @@ export class OnlineClient {
         this.selfId = m.selfId;
         this.isHost = true;
         this.setRoom(m.room as RoomData, true);
+        // Advertise the room so the lobby roster can offer Join.
+        announceRoom((m as { code?: string }).code ?? null);
         break;
       }
       case "joined": {
         this.selfId = m.selfId;
         this.isHost = false;
         this.setRoom(m.room as RoomData, true);
+        announceRoom((m as { code?: string }).code ?? null);
         break;
       }
       case "room": {
@@ -319,6 +323,7 @@ export class OnlineClient {
 
   leave() {
     this.signal?.send({ t: "leave" });
+    announceRoom(null);
     this.closePeer();
     this.signal?.close();
     this.signal = null;
