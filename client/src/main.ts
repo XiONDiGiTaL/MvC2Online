@@ -60,7 +60,7 @@ for (const [id, label] of NAV) {
 nav.append(brand, navLinks, netPill);
 
 const footer = el("footer", { class: "site-foot" },
-  el("span", { text: "MvC2Online — an original browser engine built around Marvel vs. Capcom 2's rules. No Capcom or Marvel assets are distributed." }),
+  el("span", { text: "MvC2Online — a fan-made browser engine built around Marvel vs. Capcom 2's rules. Marvel vs. Capcom 2, its characters and their likenesses belong to Capcom and Marvel." }),
   el("a", { text: "xiondigital.net", attrs: { href: "https://xiondigital.net/", target: "_blank", rel: "noopener" } })
 );
 

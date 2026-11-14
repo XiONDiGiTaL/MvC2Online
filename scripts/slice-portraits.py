@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Slice a Marvel vs. Capcom 2 character-select portrait sheet into tiles.
+
+    python scripts/slice-portraits.py portraits-sheet.png
+
+Reads the amber grid the sheet is drawn on rather than assuming pixel
+coordinates, so it works at whatever size the image was saved. Tiles are
+written as p00..p55 in roster order (Marvel 0-27, Capcom 28-55, row-major like
+the select screen) and a manifest is generated so the renderer can prefer the
+real art and fall back to the drawn busts when a tile is missing.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT_DIR = ROOT / "client" / "public" / "portraits"
+MANIFEST = ROOT / "client" / "src" / "game" / "portrait-manifest.ts"
+TILE = 160  # exported size, square
+
+
+def is_frame(pixel):
+    r, g, b = pixel[:3]
+    return r > 150 and g > 120 and b < 130 and (r - b) > 60 and (g - b) > 40
+
+
+def runs(values, min_len=6):
+    """Group indices of consecutive truthy values into (start, end) runs."""
+    out, start = [], None
+    for i, v in enumerate(values):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            if i - start >= min_len:
+                out.append((start, i - 1))
+            start = None
+    if start is not None and len(values) - start >= min_len:
+        out.append((start, len(values) - 1))
+    return out
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
+    src = Path(sys.argv[1])
+    if not src.exists():
+        print(f"no such image: {src}")
+        return 2
+
+    img = Image.open(src).convert("RGB")
+    w, h = img.size
+    px = img.load()
+    print(f"sheet: {w}x{h}")
+
+    # A row is a frame row if a decent share of its pixels are amber.
+    col_hits = [0] * w
+    row_hits = [0] * h
+    for y in range(h):
+        for x in range(w):
+            if is_frame(px[x, y]):
+                col_hits[x] += 1
+                row_hits[y] += 1
+
+    col_bands = runs([v > h * 0.10 for v in col_hits], 10)
+    row_bands = runs([v > w * 0.08 for v in row_hits], 10)
+    print(f"amber columns: {len(col_bands)} bands, rows: {len(row_bands)} bands")
+
+    if len(row_bands) < 6 or len(col_bands) < 8:
+        print("could not find an 8 x 7 portrait grid — is this the right image?")
+        return 1
+
+    # Collapse each band to its centre; frames are ~1px lines, cells sit between.
+    def centres(bands):
+        return [(a + b) // 2 for a, b in bands]
+
+    row_lines = centres(row_bands)
+    col_lines = centres(col_bands)
+
+    # Keep the 8 vertical divisions of the two blocks plus the centre gutter.
+    # Merge bands closer than 20px (double-struck frames).
+    merged = []
+    for c in col_lines:
+        if merged and c - merged[-1] < 20:
+            continue
+        merged.append(c)
+    col_lines = merged
+
+    if len(col_lines) < 9 or len(row_lines) < 7:
+        print(f"unexpected grid: {len(col_lines)} column lines, {len(row_lines)} row lines")
+        return 1
+
+    # Two 4-wide blocks separated by a gutter: take the widest gap.
+    gaps = [(col_lines[i + 1] - col_lines[i], i) for i in range(len(col_lines) - 1)]
+    gaps.sort(reverse=True)
+    split = gaps[0][1]
+
+    # Build cell boxes inside each frame.
+    def cells(start_line, end_line, block):
+        out = []
+        lines = col_lines[start_line:end_line + 1]
+        for r in range(len(row_lines) - 1):
+            top = row_lines[r]
+            bottom = row_lines[r + 1]
+            for c in range(len(lines) - 1):
+                left = lines[c]
+                right = lines[c + 1]
+                pad_x = max(2, int((right - left) * 0.04))
+                pad_y = max(2, int((bottom - top) * 0.05))
+                box = (left + pad_x, top + pad_y, right - pad_x, bottom - pad_y)
+                if box[2] - box[0] < 20 or box[3] - box[1] < 20:
+                    continue
+                index = block * 28 + r * 4 + c
+                out.append((index, box))
+        return out
+
+    left_cells = cells(0, split, 0)
+    right_cells = cells(split + 1, len(col_lines) - 1, 1)
+    all_cells = sorted(left_cells + right_cells)
+    print(f"cells found: {len(all_cells)} (left {len(left_cells)}, right {len(right_cells)})")
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for old in OUT_DIR.glob("p*.png"):
+        old.unlink()
+
+    written = []
+    for index, box in all_cells:
+        tile = img.crop(box)
+        # Square the crop from its centre so faces are not stretched.
+        tw, th = tile.size
+        side = min(tw, th)
+        tile = tile.crop(((tw - side) // 2, (th - side) // 2, (tw + side) // 2, (th + side) // 2))
+        tile = tile.resize((TILE, TILE), Image.LANCZOS)
+        name = f"p{index:02d}.png"
+        tile.save(OUT_DIR / name, optimize=True)
+        written.append(index)
+
+    manifest = (
+        "// Generated by scripts/slice-portraits.py — do not edit by hand.\n"
+        "// Character indexes whose portrait tile comes from the supplied sheet.\n"
+        f"export const SHEET_PORTRAITS: ReadonlySet<number> = new Set({json.dumps(written)});\n"
+    )
+    MANIFEST.write_text(manifest, encoding="utf-8")
+    print(f"wrote {len(written)} tiles to {OUT_DIR}")
+    print(f"manifest: {MANIFEST.relative_to(ROOT)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

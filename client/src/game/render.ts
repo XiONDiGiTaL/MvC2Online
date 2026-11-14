@@ -1,8 +1,10 @@
-// Canvas renderer. All fighters are drawn procedurally — no Capcom/Marvel art
-// is bundled, the shapes and palettes are generated from the roster hue seed.
+// Canvas renderer. Fighters are drawn procedurally from the roster hue seed;
+// portraits use the supplied sheet when it has been sliced into
+// public/portraits, and fall back to the drawn bust otherwise.
 // Rendering may use trigonometry; the simulation may not.
 
 import { ROSTER, colorsFor, hex } from "./roster";
+import { SHEET_PORTRAITS } from "./portrait-manifest";
 import { FS, ROUND_FRAMES, type Fighter, type MatchConfig, type SimState } from "./types";
 
 export const VIEW_W = 1280;
@@ -695,6 +697,9 @@ function bodyH(f: Fighter): number {
 const portraitCache = new Map<string, string>();
 
 export function portraitUrl(char: number, colorIdx: number, px = 96): string {
+  if (SHEET_PORTRAITS.has(char)) {
+    return `${import.meta.env.BASE_URL}portraits/p${String(char).padStart(2, "0")}.png`;
+  }
   const key = `${char}:${colorIdx}:${px}`;
   const cached = portraitCache.get(key);
   if (cached) return cached;
