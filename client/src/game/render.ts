@@ -701,45 +701,253 @@ export function portraitUrl(char: number, colorIdx: number, px = 96): string {
 
   const look = lookForChar(char);
   const pal = paletteForChar(char, colorIdx);
-  const small = document.createElement("canvas");
-  small.width = 34;
-  small.height = 34;
-  const g = small.getContext("2d");
-  if (!g) return "";
-  g.imageSmoothingEnabled = false;
-
-  g.save();
-  g.translate(17, 33);
-  g.scale(1.6, -1.6);
-  g.scale(look.bulk, 1);
-
-  // shoulders so the portrait reads as a bust
-  g.fillStyle = pal.suitDark;
-  g.beginPath();
-  g.moveTo(-11, -3);
-  g.lineTo(11, -3);
-  g.lineTo(9, 9);
-  g.lineTo(-9, 9);
-  g.closePath();
-  g.fill();
-  g.fillStyle = pal.suit;
-  g.fillRect(-6, -1, 12, 8);
-  g.fillStyle = pal.trim;
-  g.fillRect(-9, 1, 18, 2.2);
-
-  drawHead(g, look, pal, 13, (v) => v);
-  g.restore();
-
   const out = document.createElement("canvas");
   out.width = px;
   out.height = px;
   const o = out.getContext("2d");
   if (!o) return "";
-  o.imageSmoothingEnabled = false;
-  o.drawImage(small, 0, 0, px, px);
+  // Portraits are vector-drawn at full size rather than upscaled from a
+  // 34-pixel sprite grid, which is what made them read as coloured blobs.
+  paintBust(o, look, pal, px);
   const url = out.toDataURL("image/png");
   portraitCache.set(key, url);
   return url;
+}
+
+/** Cel-shaded head-and-shoulders portrait, drawn to fit a px x px square. */
+function paintBust(g: CanvasRenderingContext2D, look: Look, pal: Palette, px: number) {
+  const S = px;
+  const hair = hex(look.hair);
+  const ink = "#080a10";
+  const cx = S * 0.5;
+  const headR = S * 0.175 * Math.min(1.18, look.bulk);
+  const headY = S * 0.46;
+
+  g.save();
+  g.lineJoin = "round";
+  g.lineCap = "round";
+
+  // --- tile background -----------------------------------------------------
+  const bg = g.createLinearGradient(0, 0, S * 0.6, S);
+  bg.addColorStop(0, "#17294d");
+  bg.addColorStop(0.55, "#0d1628");
+  bg.addColorStop(1, "#070a12");
+  g.fillStyle = bg;
+  g.fillRect(0, 0, S, S);
+  g.save();
+  g.globalAlpha = 0.07;
+  g.fillStyle = "#8fb8ff";
+  for (let i = -S; i < S * 2; i += S * 0.16) {
+    g.beginPath();
+    g.moveTo(i, 0);
+    g.lineTo(i + S * 0.05, 0);
+    g.lineTo(i + S * 0.05 + S * 0.5, S);
+    g.lineTo(i + S * 0.5, S);
+    g.closePath();
+    g.fill();
+  }
+  g.restore();
+
+  // --- shoulders / torso ---------------------------------------------------
+  const shoulderY = headY + headR * 1.55;
+  g.fillStyle = pal.suitDark;
+  g.beginPath();
+  g.moveTo(cx - S * 0.46, S);
+  g.quadraticCurveTo(cx - S * 0.40, shoulderY, cx - S * 0.20, shoulderY - S * 0.02);
+  g.lineTo(cx + S * 0.20, shoulderY - S * 0.02);
+  g.quadraticCurveTo(cx + S * 0.40, shoulderY, cx + S * 0.46, S);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = ink;
+  g.lineWidth = S * 0.018;
+  g.stroke();
+
+  // chest panel + collar trim
+  g.fillStyle = pal.suit;
+  g.beginPath();
+  g.moveTo(cx - S * 0.17, S);
+  g.lineTo(cx - S * 0.13, shoulderY + S * 0.03);
+  g.lineTo(cx + S * 0.13, shoulderY + S * 0.03);
+  g.lineTo(cx + S * 0.17, S);
+  g.closePath();
+  g.fill();
+  g.fillStyle = pal.trim;
+  g.beginPath();
+  g.moveTo(cx - S * 0.155, shoulderY + S * 0.055);
+  g.lineTo(cx + S * 0.155, shoulderY + S * 0.055);
+  g.lineTo(cx + S * 0.14, shoulderY + S * 0.095);
+  g.lineTo(cx - S * 0.14, shoulderY + S * 0.095);
+  g.closePath();
+  g.fill();
+
+  // --- hair mass behind the head ------------------------------------------
+  if (look.head === "hair" || look.head === "bandana") {
+    g.fillStyle = hair;
+    g.beginPath();
+    g.ellipse(cx, headY - headR * 0.12, headR * 1.16, headR * 1.1, 0, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.ellipse(cx - headR * 0.75, headY + headR * 0.55, headR * 0.5, headR * 0.95, 0.35, 0, Math.PI * 2);
+    g.ellipse(cx + headR * 0.75, headY + headR * 0.55, headR * 0.5, headR * 0.95, -0.35, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = ink;
+    g.lineWidth = S * 0.016;
+    g.stroke();
+  }
+
+  // --- neck ----------------------------------------------------------------
+  g.fillStyle = pal.skinDark;
+  g.beginPath();
+  g.roundRect(cx - headR * 0.34, headY + headR * 0.55, headR * 0.68, headR * 0.95, headR * 0.2);
+  g.fill();
+
+  // --- head shape ----------------------------------------------------------
+  g.fillStyle = pal.skin;
+  g.beginPath();
+  g.ellipse(cx, headY, headR * 0.94, headR * 1.06, 0, 0, Math.PI * 2);
+  g.fill();
+  // jaw taper
+  g.beginPath();
+  g.moveTo(cx - headR * 0.78, headY + headR * 0.30);
+  g.quadraticCurveTo(cx - headR * 0.5, headY + headR * 1.12, cx, headY + headR * 1.14);
+  g.quadraticCurveTo(cx + headR * 0.5, headY + headR * 1.12, cx + headR * 0.78, headY + headR * 0.30);
+  g.closePath();
+  g.fill();
+  // ear
+  g.beginPath();
+  g.ellipse(cx + headR * 0.9, headY + headR * 0.12, headR * 0.14, headR * 0.24, 0, 0, Math.PI * 2);
+  g.fill();
+
+  // --- face shading ---------------------------------------------------------
+  const shade = g.createLinearGradient(cx - headR, headY, cx + headR, headY);
+  shade.addColorStop(0, "rgba(0,0,0,0.28)");
+  shade.addColorStop(0.45, "rgba(0,0,0,0)");
+  g.save();
+  g.beginPath();
+  g.ellipse(cx, headY + headR * 0.2, headR * 0.95, headR * 1.05, 0, 0, Math.PI * 2);
+  g.clip();
+  g.fillStyle = shade;
+  g.fillRect(cx - headR * 1.2, headY - headR, headR * 2.4, headR * 2.6);
+  g.restore();
+
+  // --- eyes, brows, nose, mouth -------------------------------------------
+  const eyeY = headY + headR * 0.10;
+  const eyeDx = headR * 0.38;
+  const eyeR = headR * 0.235;
+  if (look.head === "mask" || look.head === "helmet") {
+    // Costume over the whole face: white lenses with a hard rim.
+    g.fillStyle = look.head === "mask" ? "#f2f6ff" : "#dfe8ff";
+    for (const s of [-1, 1]) {
+      g.beginPath();
+      g.ellipse(cx + s * eyeDx, eyeY, eyeR * 1.25, eyeR * 0.78, s * 0.22, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.strokeStyle = ink;
+    g.lineWidth = S * 0.012;
+    for (const s of [-1, 1]) {
+      g.beginPath();
+      g.ellipse(cx + s * eyeDx, eyeY, eyeR * 1.25, eyeR * 0.78, s * 0.22, 0, Math.PI * 2);
+      g.stroke();
+    }
+  } else {
+    for (const s of [-1, 1]) {
+      const ex = cx + s * eyeDx;
+      g.fillStyle = "#f7f4ee";
+      g.beginPath();
+      g.ellipse(ex, eyeY, eyeR, eyeR * 0.74, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = "#1b2430";
+      g.beginPath();
+      g.arc(ex + s * eyeR * 0.16, eyeY + eyeR * 0.05, eyeR * 0.4, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = ink;
+      g.lineWidth = S * 0.009;
+      g.beginPath();
+      g.ellipse(ex, eyeY, eyeR, eyeR * 0.74, 0, 0, Math.PI * 2);
+      g.stroke();
+      // brow
+      g.strokeStyle = hair;
+      g.lineWidth = S * 0.02;
+      g.beginPath();
+      g.moveTo(ex - s * eyeR * 0.9, eyeY - eyeR * 1.5);
+      g.lineTo(ex + s * eyeR * 1.0, eyeY - eyeR * 1.9);
+      g.stroke();
+    }
+  }
+
+  // nose + mouth
+  g.strokeStyle = "rgba(0,0,0,0.42)";
+  g.lineWidth = S * 0.011;
+  g.beginPath();
+  g.moveTo(cx + headR * 0.06, eyeY + headR * 0.16);
+  g.lineTo(cx - headR * 0.04, eyeY + headR * 0.44);
+  g.lineTo(cx + headR * 0.12, eyeY + headR * 0.48);
+  g.stroke();
+  g.strokeStyle = "rgba(20,10,10,0.55)";
+  g.lineWidth = S * 0.013;
+  g.beginPath();
+  g.moveTo(cx - headR * 0.2, headY + headR * 0.78);
+  g.quadraticCurveTo(cx, headY + headR * 0.86, cx + headR * 0.2, headY + headR * 0.78);
+  g.stroke();
+
+  // --- headgear ------------------------------------------------------------
+  if (look.head === "hair") {
+    g.fillStyle = hair;
+    g.beginPath();
+    g.moveTo(cx - headR * 0.95, headY - headR * 0.25);
+    g.quadraticCurveTo(cx - headR * 0.2, headY - headR * 1.35, cx + headR * 0.95, headY - headR * 0.35);
+    g.quadraticCurveTo(cx + headR * 0.2, headY - headR * 0.72, cx - headR * 0.95, headY - headR * 0.05);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = ink;
+    g.lineWidth = S * 0.014;
+    g.stroke();
+  } else if (look.head === "bandana") {
+    g.fillStyle = pal.trim;
+    g.beginPath();
+    g.moveTo(cx - headR * 1.0, headY - headR * 0.42);
+    g.quadraticCurveTo(cx, headY - headR * 1.12, cx + headR * 1.0, headY - headR * 0.42);
+    g.quadraticCurveTo(cx, headY - headR * 0.82, cx - headR * 1.0, headY - headR * 0.16);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = ink;
+    g.lineWidth = S * 0.014;
+    g.stroke();
+    // knot tails
+    g.beginPath();
+    g.moveTo(cx + headR * 0.9, headY - headR * 0.42);
+    g.quadraticCurveTo(cx + headR * 1.5, headY - headR * 0.1, cx + headR * 1.34, headY + headR * 0.5);
+    g.lineWidth = S * 0.026;
+    g.strokeStyle = pal.trim;
+    g.stroke();
+  } else if (look.head === "helmet") {
+    g.fillStyle = pal.trimDark;
+    g.beginPath();
+    g.arc(cx, headY - headR * 0.05, headR * 1.06, Math.PI * 1.02, Math.PI * 1.98);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = ink;
+    g.lineWidth = S * 0.016;
+    g.stroke();
+    g.fillStyle = pal.trim;
+    g.beginPath();
+    g.roundRect(cx - headR * 0.55, headY - headR * 0.16, headR * 1.1, headR * 0.16, headR * 0.08);
+    g.fill();
+  } else if (look.head === "mask") {
+    // pull the mask down over the jaw, leaving the lenses above
+    g.fillStyle = pal.suit;
+    g.beginPath();
+    g.moveTo(cx - headR * 0.86, headY + headR * 0.12);
+    g.quadraticCurveTo(cx, headY + headR * 1.34, cx + headR * 0.86, headY + headR * 0.12);
+    g.quadraticCurveTo(cx, headY + headR * 0.4, cx - headR * 0.86, headY + headR * 0.12);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = ink;
+    g.lineWidth = S * 0.014;
+    g.stroke();
+  }
+
+  g.restore();
 }
 
 function drawFighter(
