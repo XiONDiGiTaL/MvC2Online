@@ -17,6 +17,12 @@ const WASM_KEY = { key: "ikemen.wasm", type: "application/wasm" };
 const META_KEY = "content.zip.meta";
 const DEFAULT_CHUNK = 256 * 1024 * 1024;
 
+// Slices up to this size get an edge cache entry. Boot hydrates one small
+// range per file in data/ and font/, which is exactly the population that
+// repeats across visits; a fighter's sprite archive is far larger and streams
+// straight through.
+const SLICE_LIMIT = 4 * 1024 * 1024;
+
 // Cached per isolate: the archive only changes on redeploy, and each uncached
 // read costs an R2 operation.
 let metaCache = null;
@@ -43,38 +49,46 @@ function parseRange(header, size) {
 }
 
 // Reads `length` bytes at `offset` across chunk objects, pulling lazily so a
-// client that aborts mid-fighter stops the remaining R2 reads.
+// client that aborts mid-fighter stops the remaining R2 reads. The loop is
+// deliberately iterative: an earlier recursive version re-entered pull()
+// across a chunk boundary and truncated spans that straddled one, which the
+// engine reported as "I/O error" opening that fighter's sprite file.
 function readSpan(env, offset, length, chunkSize) {
   let pos = offset;
   let remaining = length;
   let reader = null;
+
+  async function openChunk() {
+    const index = Math.floor(pos / chunkSize);
+    const inChunk = pos - index * chunkSize;
+    const take = Math.min(remaining, chunkSize - inChunk);
+    const obj = await env.CONTENT.get(`content.zip.${index}`, {
+      range: { offset: inChunk, length: take },
+    });
+    if (!obj) throw new Error(`missing content.zip.${index}`);
+    reader = obj.body.getReader();
+    pos += take;
+    remaining -= take;
+  }
 
   return new ReadableStream({
     async pull(controller) {
       try {
         if (!reader) {
           if (remaining <= 0) return controller.close();
-          const index = Math.floor(pos / chunkSize);
-          const inChunk = pos - index * chunkSize;
-          const take = Math.min(remaining, chunkSize - inChunk);
-          const obj = await env.CONTENT.get(`${META_KEY.replace(".meta", "")}.${index}`, {
-            range: { offset: inChunk, length: take },
-          });
-          if (!obj) {
-            return controller.error(new Error(`missing content.zip.${index}`));
-          }
-          reader = obj.body.getReader();
-          pos += take;
-          remaining -= take;
+          await openChunk();
         }
-
-        const { done, value } = await reader.read();
-        if (done) {
+        for (;;) {
+          if (!reader) return controller.close();
+          const { done, value } = await reader.read();
+          if (!done) {
+            controller.enqueue(value);
+            return;
+          }
           reader = null;
           if (remaining <= 0) return controller.close();
-          return this.pull(controller);
+          await openChunk();
         }
-        controller.enqueue(value);
       } catch (err) {
         controller.error(err);
       }
@@ -83,6 +97,13 @@ function readSpan(env, offset, length, chunkSize) {
       if (reader) reader.cancel(reason);
     },
   });
+}
+
+// Buffers a span so it can be handed to the edge cache. Only used for spans
+// that fit under SLICE_LIMIT.
+async function readSpanBuffer(env, offset, length, chunkSize) {
+  const stream = readSpan(env, offset, length, chunkSize);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 async function loadMeta(env) {
@@ -110,9 +131,17 @@ async function serveZip(request, env) {
     return new Response("content.zip has not been uploaded yet", { status: 404 });
   }
 
+  const version = meta.etag.replace(/"/g, "");
+  const url = new URL(request.url);
+  // Only the token-stamped URL may be cached forever: an upload changes the
+  // token, so a stale slice can never be paired with a new archive.
+  const versioned = url.searchParams.get("v") === version;
+
   const baseHeaders = {
     "accept-ranges": "bytes",
-    "cache-control": "public, max-age=60",
+    "cache-control": versioned
+      ? "public, max-age=31536000, immutable"
+      : "no-cache",
     "content-type": "application/zip",
     "etag": meta.etag,
   };
@@ -142,9 +171,47 @@ async function serveZip(request, env) {
   if (request.method === "HEAD") {
     return new Response(null, { status, headers });
   }
+
+  // Small versioned slices are cached at the edge, so the files boot needs are
+  // read from R2 once per colo rather than once per visitor.
+  if (versioned && range && length <= SLICE_LIMIT) {
+    const key = `${url.origin}/__slice/${version}/${offset}-${length}`;
+    const cache = caches.default;
+    const hit = await cache.match(key);
+    if (hit) {
+      return new Response(hit.body, {
+        status: 206,
+        headers: { ...headers, "x-ikemen-cache": "hit" },
+      });
+    }
+    const bytes = await readSpanBuffer(env, offset, length, meta.chunk);
+    await cache.put(
+      key,
+      new Response(bytes, {
+        headers: {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-type": "application/octet-stream",
+        },
+      }),
+    );
+    return new Response(bytes, {
+      status: 206,
+      headers: { ...headers, "x-ikemen-cache": "miss" },
+    });
+  }
+
+  // Fast path: a span that sits inside one chunk needs no stitching at all.
+  const firstChunk = Math.floor(offset / meta.chunk);
+  if (length > 0 && firstChunk === Math.floor((offset + length - 1) / meta.chunk)) {
+    const obj = await env.CONTENT.get(`content.zip.${firstChunk}`, {
+      range: { offset: offset - firstChunk * meta.chunk, length },
+    });
+    if (!obj) return new Response("missing chunk", { status: 404 });
+    return new Response(obj.body, { status, headers });
+  }
+
   return new Response(readSpan(env, offset, length, meta.chunk), { status, headers });
 }
-
 async function serveWasm(request, env) {
   const head = await env.CONTENT.head(WASM_KEY.key);
   if (!head) {
@@ -193,6 +260,14 @@ async function serveWasm(request, env) {
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
+
+    if (pathname === "/archive.txt") {
+      const meta = await loadMeta(env);
+      if (!meta) return new Response("", { status: 404 });
+      return new Response(meta.etag.replace(/"/g, ""), {
+        headers: { "content-type": "text/plain", "cache-control": "no-store" },
+      });
+    }
 
     if (pathname === "/content.zip" || pathname === "/ikemen.wasm") {
       if (request.method !== "GET" && request.method !== "HEAD") {

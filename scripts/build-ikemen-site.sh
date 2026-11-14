@@ -25,6 +25,10 @@ done
 [[ -d "$SRC/icons" ]] && cp -r "$SRC/icons" "$OUT/icons"
 [[ -f "$SRC/manifest.json" ]] && cp "$SRC/manifest.json" "$OUT/manifest.json"
 
+# Version the archive URL and keep hydrated slices cacheable (see the patch
+# script for why). Never edit the staged copy by hand — it is regenerated.
+python "$ROOT/scripts/patch-ikemen-shell.py" "$OUT/main.js"
+
 # Build stamp, shown in the footer and used by "check for updates".
 if [[ -f "$SRC/version.txt" ]]; then
 	cp "$SRC/version.txt" "$OUT/version.txt"

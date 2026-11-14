@@ -58,6 +58,13 @@ def main() -> int:
                     except OSError as exc:
                         print(f"  {rel}: {exc}")
 
+    # The engine preloads every fighter's whole SFF before the menu by default,
+    # which in a browser means pulling gigabytes of sprites on first load and
+    # running the wasm heap out of memory. BootLoadingMode 2 enters the menus
+    # immediately and loads assets in the background instead.
+    with zipfile.ZipFile(OUT, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("save/config.ini", "[Config]\r\nBootLoadingMode = 2\r\n")
+
     size = OUT.stat().st_size
     print(f"content.zip: {files} files, {raw / 1e9:.2f} GB raw -> {size / 1e6:.0f} MB "
           f"in {time.time() - started:.0f}s")
