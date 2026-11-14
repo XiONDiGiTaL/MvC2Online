@@ -7,10 +7,11 @@ import {
 } from "./ui/screens";
 import { el, icon } from "./ui/dom";
 import { loadProfile } from "./ui/profile";
-import { bindLobby, LobbyClient, sendLobbyInviteReply } from "./net/lobby";
+import { bindLobby, LobbyClient, sendLobbyInviteReply, type LobbyUser } from "./net/lobby";
 import {
-  AUTOJOIN_KEY, clearOutgoing, onOutgoing, resolveOutgoing,
-  type OutgoingInvite, type OutgoingState,
+  AUTOJOIN_KEY, clearHeld, clearOutgoing, expireHeld, invitePlayer, onHeld, onOutgoing,
+  peekHeld, queueChallenge, resolveOutgoing,
+  type HeldChallenge, type OutgoingInvite, type OutgoingState,
 } from "./net/invites";
 import { input } from "./game/input";
 import { installAudioUnlock } from "./game/audio";
@@ -46,10 +47,13 @@ function inviteSlot(): HTMLElement {
 }
 
 let inviteCard: HTMLElement | null = null;
+/** the challenge currently on screen, so we can answer it even if it goes stale */
+let pendingInvite: { from?: string; name: string; code: string } | null = null;
 
 function dismissInvite() {
   inviteCard?.remove();
   inviteCard = null;
+  pendingInvite = null;
 }
 
 /** Answer a challenge so the other player stops waiting on it. */
@@ -106,10 +110,32 @@ function showInvite(inv: { from?: string; name: string; code: string }) {
     )
   );
   inviteCard = card;
+  pendingInvite = inv;
   inviteSlot().append(card);
   window.setTimeout(() => {
     if (inviteCard === card) dismissInvite();
   }, 45_000);
+}
+
+/**
+ * A match started while their challenge was still on screen: it can no longer
+ * be taken, so tell them and leave a note instead of a live Accept button.
+ */
+function withdrawInvite() {
+  const inv = pendingInvite;
+  if (!inv) return;
+  replyTo(inv, "busy");
+  dismissInvite();
+  const notice = el("div", { class: "invite-card busy" },
+    el("span", { class: "invite-kicker", text: "CHALLENGE" }),
+    el("strong", { class: "invite-name", text: `${inv.name} wants a match` }),
+    el("span", { class: "invite-code", text: "You are in a match — challenge missed" })
+  );
+  inviteCard = notice;
+  inviteSlot().append(notice);
+  window.setTimeout(() => {
+    if (inviteCard === notice) dismissInvite();
+  }, 6000);
 }
 
 // The other half of a challenge: what happened to the one we sent. Without
@@ -157,9 +183,90 @@ function renderOutgoing(inv: OutgoingInvite | null) {
 
 onOutgoing(renderOutgoing);
 
+let selfWasBusy = lobby.identity.busy;
+
+// A challenge that was turned away by a match, or simply not answered, is held
+// rather than thrown away: the card waits, then offers to send it again.
+let players: LobbyUser[] = [];
+let heldCard: HTMLElement | null = null;
+let heldMode = "";
+let heldTimer: number | null = null;
+
+function renderHeld() {
+  const h = peekHeld();
+  const target = h ? players.find((u) => u.id === h.to) : undefined;
+  // A match blocked us, so they have to be seen back in the lobby before we
+  // offer again — an absent player is unknown, not free.
+  const stuck = Date.now() < (h?.readyAt ?? 0) || (h?.needsFree === true && target?.busy === true);
+  const mode = !h ? "" : stuck ? "waiting" : "free";
+
+  // Presence events arrive often; only rebuild when the situation changes.
+  if (mode === heldMode && (heldCard || !mode)) return;
+  heldMode = mode;
+  heldCard?.remove();
+  heldCard = null;
+  if (heldTimer !== null) {
+    window.clearTimeout(heldTimer);
+    heldTimer = null;
+  }
+  if (!h || !mode) return;
+
+  if (mode === "waiting") {
+    const card = el("div", { class: "invite-card held" },
+      el("span", { class: "invite-kicker", text: "CHALLENGE HELD" }),
+      el("strong", { class: "invite-name", text: `Holding one for ${h.name}` }),
+      el("span", {
+        class: "invite-code",
+        text: target?.busy === true
+          ? "They are in a match — we will offer it again"
+          : "We will offer it again shortly",
+      }),
+      el("div", { class: "invite-actions" },
+        el("button", { class: "lb-mini", text: "Forget it", on: { click: () => clearHeld() } })
+      )
+    );
+    heldCard = card;
+    inviteSlot().append(card);
+    heldTimer = window.setTimeout(renderHeld, Math.max(0, h.readyAt - Date.now()) + 80);
+    return;
+  }
+
+  const card = el("div", { class: "invite-card held free" },
+    el("span", { class: "invite-kicker", text: "CHALLENGE HELD" }),
+    el("strong", { class: "invite-name", text: `${h.name} is free` }),
+    el("span", { class: "invite-code", text: "Send the challenge again?" }),
+    el("div", { class: "invite-actions" },
+      el("button", { class: "lb-mini on", text: "Send", on: { click: () => sendHeld(h) } }),
+      el("button", { class: "lb-mini", text: "Not now", on: { click: () => clearHeld() } })
+    )
+  );
+  heldCard = card;
+  inviteSlot().append(card);
+  heldTimer = window.setTimeout(expireHeld, Math.max(0, h.expiresAt - Date.now()) + 80);
+}
+
+function sendHeld(h: HeldChallenge) {
+  clearHeld();
+  const room = lobby.identity.room;
+  if (room && invitePlayer(h.to, h.name, room)) return;
+  // No room of our own yet: open one, and the invite follows the code.
+  queueChallenge({ id: h.to, name: h.name });
+  go("online");
+}
+
+onHeld(() => renderHeld());
+
 lobby.on((e) => {
   if (e.t === "invite") showInvite(e);
   else if (e.t === "invite-reply") resolveOutgoing(e.state, e.from);
+  else if (e.t === "users") {
+    players = e.users;
+    renderHeld();
+    // If we started a match while a challenge was up, it has to be withdrawn.
+    const busyNow = e.users.find((u) => u.self)?.busy === true;
+    if (busyNow && !selfWasBusy) withdrawInvite();
+    selfWasBusy = busyNow;
+  }
 });
 
 const NAV: [ScreenId, string][] = [

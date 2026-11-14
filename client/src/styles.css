@@ -1357,3 +1357,9 @@ kbd {
 .invite-card.out.accepted { border-color: var(--blue-line); }
 .invite-card.out.accepted .invite-kicker { color: var(--blue); }
 .invite-card.out.declined, .invite-card.out.expired, .invite-card.out.busy { border-color: var(--line); }
+
+/* a challenge held for a player who was busy or did not answer */
+.invite-card.held { border-color: var(--line-strong); }
+.invite-card.held .invite-kicker { color: var(--muted-dim); }
+.invite-card.held.free { border-color: var(--blue-line); }
+.invite-card.held.free .invite-kicker { color: var(--blue); }
