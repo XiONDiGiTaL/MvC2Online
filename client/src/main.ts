@@ -7,8 +7,11 @@ import {
 } from "./ui/screens";
 import { el, icon } from "./ui/dom";
 import { loadProfile } from "./ui/profile";
-import { bindLobby, LobbyClient } from "./net/lobby";
-import { AUTOJOIN_KEY } from "./net/invites";
+import { bindLobby, LobbyClient, sendLobbyInviteReply } from "./net/lobby";
+import {
+  AUTOJOIN_KEY, clearOutgoing, onOutgoing, resolveOutgoing,
+  type OutgoingInvite, type OutgoingState,
+} from "./net/invites";
 import { input } from "./game/input";
 import { installAudioUnlock } from "./game/audio";
 import { setSignalOverride } from "./net/signal";
@@ -35,6 +38,13 @@ window.addEventListener("pagehide", () => lobby.close());
 
 // Challenges arrive on the lobby channel from whichever screen the player is
 // on, so the accepting banner lives at app level rather than in the home UI.
+const inviteStack = el("div", { class: "invite-stack" });
+
+function inviteSlot(): HTMLElement {
+  if (!inviteStack.isConnected) document.body.append(inviteStack);
+  return inviteStack;
+}
+
 let inviteCard: HTMLElement | null = null;
 
 function dismissInvite() {
@@ -42,19 +52,25 @@ function dismissInvite() {
   inviteCard = null;
 }
 
-function showInvite(inv: { name: string; code: string }) {
+/** Answer a challenge so the other player stops waiting on it. */
+function replyTo(inv: { from?: string; code: string }, state: "accepted" | "declined" | "busy") {
+  if (inv.from) sendLobbyInviteReply(inv.from, inv.code, state);
+}
+
+function showInvite(inv: { from?: string; name: string; code: string }) {
   dismissInvite();
 
-  // A fight in progress wins over a challenge: acknowledge it and move on
-  // rather than offering a button that would drop the player out of a match.
+  // A fight in progress wins over a challenge: acknowledge it, tell the sender,
+  // and never offer a button that would drop the player out of a match.
   if (lobby.identity.busy) {
+    replyTo(inv, "busy");
     const notice = el("div", { class: "invite-card busy" },
       el("span", { class: "invite-kicker", text: "CHALLENGE" }),
       el("strong", { class: "invite-name", text: `${inv.name} wants a match` }),
       el("span", { class: "invite-code", text: "You are in a match — challenge missed" })
     );
     inviteCard = notice;
-    document.body.append(notice);
+    inviteSlot().append(notice);
     window.setTimeout(() => {
       if (inviteCard === notice) dismissInvite();
     }, 6000);
@@ -70,24 +86,80 @@ function showInvite(inv: { name: string; code: string }) {
         text: "Accept",
         on: {
           click: () => {
+            replyTo(inv, "accepted");
             sessionStorage.setItem(AUTOJOIN_KEY, inv.code);
             dismissInvite();
             location.assign(`?room=${encodeURIComponent(inv.code)}`);
           },
         },
       }),
-      el("button", { class: "lb-mini", text: "Decline", on: { click: dismissInvite } })
+      el("button", {
+        class: "lb-mini",
+        text: "Decline",
+        on: {
+          click: () => {
+            replyTo(inv, "declined");
+            dismissInvite();
+          },
+        },
+      })
     )
   );
   inviteCard = card;
-  document.body.append(card);
+  inviteSlot().append(card);
   window.setTimeout(() => {
     if (inviteCard === card) dismissInvite();
   }, 45_000);
 }
 
+// The other half of a challenge: what happened to the one we sent. Without
+// this the sender sits on a room wondering whether anyone is coming.
+let outgoingCard: HTMLElement | null = null;
+let outgoingTimer: number | null = null;
+
+function renderOutgoing(inv: OutgoingInvite | null) {
+  outgoingCard?.remove();
+  outgoingCard = null;
+  if (outgoingTimer !== null) {
+    window.clearTimeout(outgoingTimer);
+    outgoingTimer = null;
+  }
+  if (!inv) return;
+
+  const copy: Record<OutgoingState, [string, string]> = {
+    waiting: [`Waiting for ${inv.name}…`, `ROOM ${inv.code}`],
+    accepted: [`${inv.name} accepted`, `ROOM ${inv.code} — they are joining`],
+    declined: [`${inv.name} declined`, "Try someone else"],
+    busy: [`${inv.name} is in a match`, "They are mid-match — try again after"],
+    expired: [`No answer from ${inv.name}`, "The invite timed out"],
+  };
+  const [title, sub] = copy[inv.state];
+  const card = el("div", { class: `invite-card out ${inv.state}` },
+    el("span", { class: "invite-kicker", text: "CHALLENGE SENT" }),
+    el("strong", { class: "invite-name", text: title }),
+    el("span", { class: "invite-code", text: sub })
+  );
+  outgoingCard = card;
+  inviteSlot().append(card);
+
+  // Results linger just long enough to read; the waiting card stays until it
+  // is answered or times out on its own.
+  if (inv.state !== "waiting") {
+    outgoingTimer = window.setTimeout(() => {
+      if (outgoingCard === card) {
+        outgoingCard = null;
+        card.remove();
+        clearOutgoing();
+      }
+    }, 7000);
+  }
+}
+
+onOutgoing(renderOutgoing);
+
 lobby.on((e) => {
   if (e.t === "invite") showInvite(e);
+  else if (e.t === "invite-reply") resolveOutgoing(e.state, e.from);
 });
 
 const NAV: [ScreenId, string][] = [

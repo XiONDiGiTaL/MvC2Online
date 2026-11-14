@@ -22,6 +22,8 @@ export interface LobbyIdentity {
   busy: boolean;
 }
 
+export type InviteReply = "accepted" | "declined" | "busy";
+
 export interface LobbyUser {
   id: string;
   name: string;
@@ -37,7 +39,8 @@ export type LobbyEvent =
   | { t: "users"; users: LobbyUser[] }
   | { t: "chat"; id: string; name: string; avatar: string; text: string; ts: number }
   | { t: "system"; text: string }
-  | { t: "invite"; from: string; name: string; code: string };
+  | { t: "invite"; from: string; name: string; code: string }
+  | { t: "invite-reply"; from: string; name: string; code: string; state: InviteReply };
 
 type Handler = (e: LobbyEvent) => void;
 
@@ -64,6 +67,11 @@ export function sendLobbyInvite(to: string, code: string): boolean {
  * Mark ourselves unavailable (team select / mid-match) so the roster shows it
  * and nobody wastes a challenge on us.
  */
+/** Answer a challenge so the other player stops waiting on it. */
+export function sendLobbyInviteReply(to: string, code: string, state: InviteReply): boolean {
+  return activeLobby?.sendInviteReply(to, code, state) ?? false;
+}
+
 export function announceBusy(busy: boolean) {
   activeLobby?.setBusy(busy);
 }
@@ -279,6 +287,27 @@ export class LobbyClient {
     this.setIdentity({ room: code });
   }
 
+  sendInviteReply(to: string, code: string, state: InviteReply): boolean {
+    if (!to || this.status !== "online") return false;
+    this.raw({
+      topic: TOPIC,
+      event: "broadcast",
+      payload: {
+        type: "broadcast",
+        event: "invite-reply",
+        payload: {
+          to,
+          from: this.selfId,
+          name: this.identity.name,
+          code: code.trim().toUpperCase(),
+          state,
+        },
+      },
+      ref: this.nextRef(),
+    });
+    return true;
+  }
+
   setBusy(busy: boolean) {
     if (this.identity.busy === busy) return;
     this.setIdentity({ busy });
@@ -378,6 +407,20 @@ export class LobbyClient {
         from: String(d.from ?? ""),
         name: String(d.name ?? "A player").slice(0, 24),
         code: String(d.code).toUpperCase().slice(0, 8),
+      });
+      return;
+    }
+
+    if (ev === "broadcast" && p?.event === "invite-reply") {
+      const d = p.payload as { to?: string; from?: string; name?: string; code?: string; state?: string } | undefined;
+      if (!d?.to || d.to !== this.selfId) return;
+      const state = d.state === "accepted" || d.state === "busy" ? d.state : "declined";
+      this.emit({
+        t: "invite-reply",
+        from: String(d.from ?? ""),
+        name: String(d.name ?? "A player").slice(0, 24),
+        code: String(d.code ?? "").toUpperCase().slice(0, 8),
+        state,
       });
       return;
     }

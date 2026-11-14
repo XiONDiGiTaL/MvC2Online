@@ -9,8 +9,7 @@
 import type { App } from "../app";
 import { button, el, icon, toast } from "./dom";
 import { avatarFromFile, saveProfile } from "./profile";
-import { queueChallenge } from "../net/invites";
-import { sendLobbyInvite } from "../net/lobby";
+import { invitePlayer, queueChallenge } from "../net/invites";
 import {
   addRemoteFriend, ensureSession, fetchRemoteFriends, fetchRemoteProfile,
   loadSession, pushRemoteProfile, removeRemoteFriend, signIn, signOut, signUp,
@@ -449,7 +448,7 @@ export function homeLobby(app: App, actions: LobbyAction[]): HTMLElement {
   function challenge(target: { id: string; name: string }) {
     const room = app.lobby?.identity.room;
     if (room) {
-      if (sendLobbyInvite(target.id, room)) toast(`Invited ${target.name} to room ${room}`, "ok");
+      if (invitePlayer(target.id, target.name, room)) toast(`Invited ${target.name} to room ${room}`, "ok");
       else toast("Invite could not be sent — try again in a moment", "error");
       return;
     }

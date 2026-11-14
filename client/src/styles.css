@@ -1305,11 +1305,20 @@ kbd {
 .lb-acct-note { margin: 2px 0 0; font-size: 11px; line-height: 1.45; color: var(--muted-dim); }
 
 /* challenge banner: arrives on any screen */
-.invite-card {
+/* challenge cards stack in one corner: the one we got, the one we sent */
+.invite-stack {
   position: fixed;
   right: 20px;
   bottom: 20px;
   z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+.invite-card {
+  pointer-events: auto;
   width: min(320px, calc(100vw - 40px));
   display: flex;
   flex-direction: column;
@@ -1341,3 +1350,10 @@ kbd {
 .invite-card.busy .invite-code { color: var(--muted-dim); letter-spacing: .04em; }
 /* unavailable players: the action is shown but inert */
 .lb-mini:disabled { opacity: .35; cursor: not-allowed; }
+
+/* the invite we sent: waiting, then whatever answer came back */
+.invite-card.out .invite-kicker { color: var(--muted-dim); }
+.invite-card.out.waiting { border-color: var(--line-strong); }
+.invite-card.out.accepted { border-color: var(--blue-line); }
+.invite-card.out.accepted .invite-kicker { color: var(--blue); }
+.invite-card.out.declined, .invite-card.out.expired, .invite-card.out.busy { border-color: var(--line); }
