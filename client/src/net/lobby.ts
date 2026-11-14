@@ -8,6 +8,12 @@
 import { loadRealtimeConfig, makeId, type RealtimeConfig } from "./signal-rt";
 
 const HEARTBEAT_MS = 25_000;
+// A presence entry that has not re-announced itself within this window belongs
+// to a tab that is gone (closed uncleanly, crashed, or frozen). The window is
+// generous because background tabs get their timers throttled to about once a
+// minute. Re-announcing is cheap: one small broadcast every PRESENCE_BEAT_MS.
+const PRESENCE_BEAT_MS = 20_000;
+const PRESENCE_TTL_MS = 90_000;
 const CHAT_MAX = 240;
 const CHAT_COOLDOWN_MS = 700;
 const TOPIC = "realtime:mvc2:lobby";
@@ -81,6 +87,8 @@ interface PresenceMeta {
   avatar?: string;
   room?: string | null;
   busy?: boolean;
+  /** counter that changes on every announcement, forcing a presence diff */
+  beat?: number;
 }
 
 export class LobbyClient {
@@ -99,6 +107,11 @@ export class LobbyClient {
   private retryTimer: number | null = null;
   private lastChatAt = 0;
   private closing = false;
+  /** when we last heard a presence announcement per key (local clock) */
+  private lastSeen = new Map<string, number>();
+  /** bumped on every announce so peers always get a fresh meta */
+  private beat = 0;
+  private sweep: number | null = null;
 
   on(fn: Handler): () => void {
     this.handlers.add(fn);
@@ -162,6 +175,9 @@ export class LobbyClient {
           this.raw({ topic: "phoenix", event: "heartbeat", payload: {}, ref: this.nextRef() });
         }, HEARTBEAT_MS);
       }
+      if (this.sweep === null) {
+        this.sweep = window.setInterval(() => this.sweepPresence(), PRESENCE_BEAT_MS);
+      }
     };
 
     ws.onclose = () => {
@@ -170,7 +186,12 @@ export class LobbyClient {
         window.clearInterval(this.heartbeat);
         this.heartbeat = null;
       }
+      if (this.sweep !== null) {
+        window.clearInterval(this.sweep);
+        this.sweep = null;
+      }
       this.users.clear();
+      this.lastSeen.clear();
       this.emitUsers();
       this.setStatus("offline");
       this.scheduleRetry();
@@ -233,10 +254,46 @@ export class LobbyClient {
           avatar: this.identity.avatar,
           room: this.identity.room,
           busy: this.identity.busy === true,
+          beat: ++this.beat,
         },
       },
       ref: this.nextRef(),
     });
+    this.lastSeen.set(this.selfId, Date.now());
+  }
+
+  /**
+   * The realtime server only drops a presence entry when it notices the socket
+   * dying, which a browser closing a tab does not always make obvious. So we
+   * keep our own clock: live players re-announce every PRESENCE_BEAT_MS, and
+   * anyone who has gone quiet for PRESENCE_TTL_MS is taken off the roster.
+   */
+  private sweepPresence() {
+    if (this.status !== "online" || !this.joined) return;
+    // A re-track does not reliably reach other clients as a presence diff, so
+    // liveness rides the broadcast channel instead: everyone hears the beat.
+    this.raw({
+      topic: TOPIC,
+      event: "broadcast",
+      payload: {
+        type: "broadcast",
+        event: "beat",
+        payload: { from: this.selfId },
+      },
+      ref: this.nextRef(),
+    });
+
+    const now = Date.now();
+    let dropped = false;
+    for (const [key, seen] of this.lastSeen) {
+      if (key === this.selfId || now - seen < PRESENCE_TTL_MS) continue;
+      const gone = this.users.get(key);
+      this.lastSeen.delete(key);
+      this.users.delete(key);
+      dropped = true;
+      if (gone && !gone.self) this.emit({ t: "system", text: `${gone.name} left` });
+    }
+    if (dropped) this.emitUsers();
   }
 
   /** Profile or room change: re-track so everyone sees it immediately. */
@@ -378,6 +435,7 @@ export class LobbyClient {
 
     if (ev === "presence_state") {
       this.users.clear();
+      this.lastSeen.clear();
       for (const [key, val] of Object.entries(p ?? {})) {
         this.absorb(key, (val as { metas?: PresenceMeta[] })?.metas?.[0]);
       }
@@ -394,6 +452,7 @@ export class LobbyClient {
         const gone = this.users.get(key);
         if (gone && !gone.self) this.emit({ t: "system", text: `${gone.name} left` });
         this.users.delete(key);
+        this.lastSeen.delete(key);
       }
       this.emitUsers();
       return;
@@ -408,6 +467,12 @@ export class LobbyClient {
         name: String(d.name ?? "A player").slice(0, 24),
         code: String(d.code).toUpperCase().slice(0, 8),
       });
+      return;
+    }
+
+    if (ev === "broadcast" && p?.event === "beat") {
+      const d = p.payload as { from?: string } | undefined;
+      if (d?.from && d.from !== this.selfId) this.lastSeen.set(d.from, Date.now());
       return;
     }
 
@@ -443,6 +508,8 @@ export class LobbyClient {
 
   private absorb(key: string, meta: PresenceMeta | undefined) {
     if (!meta || key === this.selfId) return;
+    // Any announcement — join, re-beat or room change — proves the tab is alive.
+    this.lastSeen.set(key, Date.now());
     const fresh = !this.users.has(key);
     this.users.set(key, {
       id: key,
@@ -464,12 +531,21 @@ export class LobbyClient {
       busy: this.identity.busy === true,
       self: true,
     });
+    this.lastSeen.set(this.selfId, Date.now());
   }
 
   close() {
     this.closing = true;
     if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
     this.heartbeat = null;
+    if (this.sweep !== null) window.clearInterval(this.sweep);
+    this.sweep = null;
+    // Leaving the topic clears our presence entry immediately, so a clean exit
+    // never needs the staleness sweep to notice it.
+    if (this.joined) {
+      this.raw({ topic: TOPIC, event: "phx_leave", payload: {}, ref: this.nextRef() });
+      this.joined = false;
+    }
     if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
     this.retryTimer = null;
     try {
