@@ -278,8 +278,8 @@ const ARCH_HEAD: Record<string, Look["head"]> = {
   balanced: "bandana",
 };
 
-function lookFor(f: Fighter): Look {
-  const def = ROSTER[f.char] ?? ROSTER[0];
+function lookForChar(char: number): Look {
+  const def = ROSTER[char] ?? ROSTER[0];
   const preset = LOOKS[def.id] ?? {};
   return {
     head: preset.head ?? ARCH_HEAD[def.arch] ?? "hair",
@@ -290,6 +290,10 @@ function lookFor(f: Fighter): Look {
     scarf: preset.scarf,
     claws: preset.claws,
   };
+}
+
+function lookFor(f: Fighter): Look {
+  return lookForChar(f.char);
 }
 
 function mix(a: number, b: number, t: number): string {
@@ -312,8 +316,8 @@ interface Palette {
   skinDark: string;
 }
 
-function paletteFor(f: Fighter, colorIdx: number): Palette {
-  const c = colorsFor(f.char, colorIdx);
+function paletteForChar(char: number, colorIdx: number): Palette {
+  const c = colorsFor(char, colorIdx);
   return {
     suit: hex(c.primary),
     suitDark: mix(c.primary, 0x05060a, 0.46),
@@ -323,6 +327,10 @@ function paletteFor(f: Fighter, colorIdx: number): Palette {
     skin: hex(c.skin),
     skinDark: mix(c.skin, 0x1a1208, 0.3),
   };
+}
+
+function paletteFor(f: Fighter, colorIdx: number): Palette {
+  return paletteForChar(f.char, colorIdx);
 }
 
 type Point = [number, number];
@@ -678,6 +686,60 @@ function paintFigure(
 
 function bodyH(f: Fighter): number {
   return f.crouch ? 78 : 116;
+}
+
+// -------------------------------------------------------------- portraits
+// The select screen and gallery show the same head the fighter is drawn with,
+// so a character's portrait is literally its sprite face rather than a colour
+// swatch with initials on it.
+const portraitCache = new Map<string, string>();
+
+export function portraitUrl(char: number, colorIdx: number, px = 96): string {
+  const key = `${char}:${colorIdx}:${px}`;
+  const cached = portraitCache.get(key);
+  if (cached) return cached;
+
+  const look = lookForChar(char);
+  const pal = paletteForChar(char, colorIdx);
+  const small = document.createElement("canvas");
+  small.width = 34;
+  small.height = 34;
+  const g = small.getContext("2d");
+  if (!g) return "";
+  g.imageSmoothingEnabled = false;
+
+  g.save();
+  g.translate(17, 33);
+  g.scale(1.6, -1.6);
+  g.scale(look.bulk, 1);
+
+  // shoulders so the portrait reads as a bust
+  g.fillStyle = pal.suitDark;
+  g.beginPath();
+  g.moveTo(-11, -3);
+  g.lineTo(11, -3);
+  g.lineTo(9, 9);
+  g.lineTo(-9, 9);
+  g.closePath();
+  g.fill();
+  g.fillStyle = pal.suit;
+  g.fillRect(-6, -1, 12, 8);
+  g.fillStyle = pal.trim;
+  g.fillRect(-9, 1, 18, 2.2);
+
+  drawHead(g, look, pal, 13, (v) => v);
+  g.restore();
+
+  const out = document.createElement("canvas");
+  out.width = px;
+  out.height = px;
+  const o = out.getContext("2d");
+  if (!o) return "";
+  o.imageSmoothingEnabled = false;
+  o.drawImage(small, 0, 0, px, px);
+  const url = out.toDataURL("image/png");
+  portraitCache.set(key, url);
+  return url;
 }
 
 function drawFighter(

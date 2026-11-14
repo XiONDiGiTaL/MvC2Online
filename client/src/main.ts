@@ -6,10 +6,14 @@ import {
 } from "./ui/screens";
 import { el, icon } from "./ui/dom";
 import { input } from "./game/input";
+import { installAudioUnlock } from "./game/audio";
 import { setSignalOverride } from "./net/signal";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("#app missing from index.html");
+
+// Browsers only allow audio after a gesture; this arms the one-shot unlock.
+installAudioUnlock();
 
 const settings = loadSettings();
 if (!settings.name) {

@@ -1,6 +1,8 @@
 // Tiny DOM helpers. The UI is hand-built DOM (no framework) so the build stays
 // dependency-free and fast on ordinary desktop hardware.
 
+import { playSfx } from "../game/audio";
+
 type Props = {
   class?: string;
   text?: string;
@@ -50,7 +52,18 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 export function button(label: string, cls: string, onClick: () => void, extra?: Props): HTMLButtonElement {
-  const b = el("button", { class: `btn ${cls}`, text: label, on: { click: onClick }, ...extra });
+  const b = el("button", {
+    class: `btn ${cls}`,
+    text: label,
+    ...extra,
+    on: {
+      click: () => {
+        playSfx("ui");
+        onClick();
+      },
+      ...(extra?.on ?? {}),
+    },
+  });
   b.type = "button";
   return b;
 }

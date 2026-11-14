@@ -7,6 +7,7 @@ import { createState, stepGame, resetTraining, teamHealth } from "../game/engine
 import { ROSTER, colorsFor, hex } from "../game/roster";
 import { input } from "../game/input";
 import { VIEW_W, VIEW_H, drawGame, stageName } from "../game/render";
+import { isMuted, playSfx, startMusic, stopMusic, toggleMuted } from "../game/audio";
 import { FS, type MatchConfig, type SimState } from "../game/types";
 import type { RtcPeer } from "../net/peer";
 import { el, button, toast } from "./dom";
@@ -50,6 +51,11 @@ export class MatchScreen {
   private hudEl: HTMLElement;
   private disposed = false;
   private startTime = 0;
+  private prevSpark = 0;
+  private prevProj = 0;
+  private prevAnnounce = 0;
+  private prevActive: [number, number] = [-1, -1];
+  private prevAir: boolean[] = [false, false, false, false, false, false];
 
   constructor(setup: MatchSetup) {
     this.setup = setup;
@@ -86,6 +92,7 @@ export class MatchScreen {
   start() {
     this.startTime = performance.now();
     this.last = performance.now();
+    startMusic();
     // Debug/verification handle: lets a test harness read the live simulation.
     const self = this;
     (window as unknown as Record<string, unknown>).__mvc2 = {
@@ -115,6 +122,7 @@ export class MatchScreen {
         this.frames++;
       }
       if (steps === 6) this.acc = 0;
+      this.syncAudio();
     }
 
     this.fpsT += dt;
@@ -135,6 +143,44 @@ export class MatchScreen {
       }
     }
   };
+
+  /** Turns simulation edges into sound: hits, blocks, projectiles, jumps, KOs. */
+  private syncAudio() {
+    const s = this.state;
+
+    if (s.hitsparkLife > 0 && this.prevSpark === 0) {
+      const blocked = s.fighters.some((f) => f.blockstun > 0);
+      playSfx(blocked ? "block" : s.announce === 4 ? "heavy" : "hit");
+    }
+    this.prevSpark = s.hitsparkLife;
+
+    let live = 0;
+    for (const p of s.projectiles) if (p.alive) live++;
+    if (live > this.prevProj) playSfx("fireball");
+    this.prevProj = live;
+
+    if (s.announce !== this.prevAnnounce) {
+      if (s.announce === 1 || s.announce === 3) playSfx("round");
+      else if (s.announce === 2) playSfx("ko");
+      else if (s.announce === 4) playSfx("hyper");
+      this.prevAnnounce = s.announce;
+    }
+
+    for (let t = 0; t < 2; t++) {
+      const active = s.active[t];
+      if (active !== this.prevActive[t]) {
+        if (this.prevActive[t] >= 0) playSfx("tag");
+        this.prevActive[t] = active;
+      }
+    }
+
+    for (let i = 0; i < 6; i++) {
+      const f = s.fighters[i];
+      if (f.airborne && !this.prevAir[i]) playSfx("jump");
+      else if (!f.airborne && this.prevAir[i] && f.st === FS.LAND) playSfx("land");
+      this.prevAir[i] = f.airborne;
+    }
+  }
 
   private advance() {
     const m0 = this.localMask(0);
@@ -233,7 +279,11 @@ export class MatchScreen {
     }
     actions.append(
       button("Pause", "ghost sm", () => this.togglePause()),
-      button("Controls", "ghost sm", () => this.showControls())
+      button("Controls", "ghost sm", () => this.showControls()),
+      button(isMuted() ? "Sound: Off" : "Sound: On", "ghost sm", () => {
+        toggleMuted();
+        this.renderHud();
+      })
     );
     this.hudEl.append(actions);
   }
@@ -378,6 +428,7 @@ export class MatchScreen {
 
   dispose() {
     this.disposed = true;
+    stopMusic();
     cancelAnimationFrame(this.raf);
     input.enabled = false;
     input.onEscape = null;

@@ -3,6 +3,8 @@
 // from the first frame — there is no unlock state anywhere in the app.
 
 import { COLORS_PER_CHAR, ROSTER, colorsFor, hex } from "../game/roster";
+import { portraitUrl } from "../game/render";
+import { playSfx } from "../game/audio";
 import type { CharacterDef } from "../game/types";
 import { el, button, icon, toast } from "./dom";
 
@@ -26,7 +28,14 @@ export function portrait(def: CharacterDef, colorIdx: number, size = 64, showNam
     title: `${def.name} — ${def.arch}`,
   });
   tile.append(
-    el("div", { class: "portrait-figure", style: { background: hex(c.skin) } }),
+    el("img", {
+      class: "portrait-face",
+      attrs: {
+        src: portraitUrl(ROSTER.indexOf(def), colorIdx, Math.round(size * 1.4)),
+        alt: def.name,
+        draggable: "false",
+      },
+    }),
     el("div", { class: "portrait-short", text: def.short }),
     el("div", { class: "portrait-glow", style: { background: hex(c.accent) } })
   );
@@ -92,6 +101,7 @@ export class CharSelect {
       this.pick.assists.push(0);
       this.pick.colors.push(0);
     }
+    playSfx("select");
     this.changed();
   }
 
