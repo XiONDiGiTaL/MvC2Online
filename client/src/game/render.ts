@@ -25,11 +25,15 @@ function camera(s: SimState): Cam {
   return { x, zoom };
 }
 
+// World space is authored directly in canvas coordinates: the ground line is at
+// y = FLOOR and a fighter standing at y = 0 sits on it. So the camera has to
+// zoom about that same floor line — translating by FLOOR again would push every
+// fighter a full screen below the stage.
 function withCam(ctx: CanvasRenderingContext2D, cam: Cam, fn: () => void) {
   ctx.save();
-  ctx.translate(VIEW_W / 2, FLOOR + 20);
+  ctx.translate(VIEW_W / 2, FLOOR);
   ctx.scale(cam.zoom, cam.zoom);
-  ctx.translate(-cam.x, -20);
+  ctx.translate(-cam.x, -FLOOR);
   fn();
   ctx.restore();
 }
@@ -161,6 +165,517 @@ function drawStage(ctx: CanvasRenderingContext2D, cam: Cam, stage: number, frame
 }
 
 // ---------------------------------------------------------------- fighter
+// Fighters are painted into a small one-unit-per-pixel surface and then blitted
+// at 2x with smoothing disabled, so every shape lands on a chunky arcade pixel
+// grid. The body is built from joints, which is what lets one figure read as
+// idle, walking, crouching, attacking, stunned or knocked out without any
+// per-character artwork.
+const SPR_W = 132;
+const SPR_H = 124;
+const SPR_FEET_X = 66;
+const SPR_FEET_Y = 112;
+const OUTLINE = "#05060b";
+
+const HALO: [number, number][] = [
+  [-1, 0], [1, 0], [0, -1], [0, 1],
+  [-1, -1], [1, -1], [-1, 1], [1, 1],
+];
+
+const surfaces: { [k in "fig" | "sil" | "spr"]?: CanvasRenderingContext2D } = {};
+
+/** One reused 132x124 surface per role, cleared and returned ready to draw. */
+function surface(role: "fig" | "sil" | "spr"): CanvasRenderingContext2D {
+  let g = surfaces[role];
+  if (!g) {
+    const c = document.createElement("canvas");
+    c.width = SPR_W;
+    c.height = SPR_H;
+    const built = c.getContext("2d");
+    if (!built) throw new Error("2d context unavailable");
+    built.imageSmoothingEnabled = false;
+    g = built;
+    surfaces[role] = g;
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = "source-over";
+  g.globalAlpha = 1;
+  g.clearRect(0, 0, SPR_W, SPR_H);
+  return g;
+}
+
+interface Look {
+  head: "bare" | "mask" | "hair" | "bandana" | "helmet";
+  hair: number;
+  bulk: number;
+  size: number;
+  cape?: boolean;
+  scarf?: boolean;
+  claws?: boolean;
+}
+
+// Per-character silhouette cues. Everything not listed falls back to a build
+// derived from the roster weight and a head style derived from the archetype.
+const LOOKS: Record<string, Partial<Look>> = {
+  hulk: { head: "bare", bulk: 1.34, size: 1.1 },
+  juggernaut: { head: "helmet", bulk: 1.32, size: 1.09 },
+  colossus: { head: "bare", bulk: 1.28, size: 1.05 },
+  sentinel: { head: "helmet", bulk: 1.22, size: 1.14 },
+  zangief: { head: "bare", bulk: 1.28, size: 1.05 },
+  thanos: { head: "helmet", bulk: 1.22, size: 1.06 },
+  "omega-red": { head: "helmet", bulk: 1.2 },
+  amingo: { head: "bare", bulk: 1.2 },
+  venom: { head: "mask", bulk: 1.22 },
+  sabretooth: { head: "hair", hair: 0xd8b070, bulk: 1.18 },
+  jin: { head: "helmet", bulk: 1.22, size: 1.06 },
+  spiderman: { head: "mask" },
+  ironman: { head: "helmet" },
+  warmachine: { head: "helmet", bulk: 1.12 },
+  magneto: { head: "helmet", cape: true },
+  doom: { head: "helmet", cape: true },
+  storm: { head: "hair", hair: 0xe8ecf4, cape: true },
+  wolverine: { head: "mask", claws: true },
+  "wolverine-bone": { head: "mask", claws: true },
+  cap: { head: "helmet" },
+  cyclops: { head: "helmet" },
+  ryu: { head: "bandana" },
+  ken: { head: "hair", hair: 0xe8c060 },
+  akuma: { head: "bandana", hair: 0xb03020 },
+  dan: { head: "bandana" },
+  guile: { head: "hair", hair: 0xe8d070, bulk: 1.1 },
+  chunli: { head: "hair", hair: 0x2a1c14 },
+  cammy: { head: "hair", hair: 0xf0d060 },
+  bison: { head: "helmet", bulk: 1.12 },
+  dhalsim: { head: "bare", hair: 0x2a1c14 },
+  strider: { head: "mask", scarf: true },
+  morrigan: { head: "hair", hair: 0x1a3a2a, cape: true },
+  felicia: { head: "hair", hair: 0x8fd0e0 },
+  servbot: { head: "helmet", size: 0.82 },
+  roll: { head: "helmet", size: 0.9 },
+  megaman: { head: "helmet", size: 0.92 },
+  shuma: { head: "bare", bulk: 1.08 },
+  bbhood: { head: "hair", hair: 0xd8a050, size: 0.92 },
+  psylocke: { head: "hair", hair: 0x3a2a5a },
+  rogue: { head: "hair", hair: 0x8a4a2a },
+  marrow: { head: "hair", hair: 0x5a4a3a },
+  sonson: { head: "hair", hair: 0x3a2418 },
+  tron: { head: "helmet", size: 0.94 },
+  blackheart: { head: "helmet", bulk: 1.1 },
+  "silver-samurai": { head: "helmet", bulk: 1.06 },
+  jill: { head: "hair", hair: 0x2a2418 },
+  hayato: { head: "helmet" },
+  cable: { head: "hair", hair: 0x9aa4b0, bulk: 1.1 },
+  gambit: { head: "hair", hair: 0x4a3020 },
+  iceman: { head: "bare" },
+  ruby: { head: "hair", hair: 0x2a2438, cape: true },
+  spiral: { head: "hair", hair: 0x2a4a8a },
+};
+
+const ARCH_HEAD: Record<string, Look["head"]> = {
+  grappler: "bare",
+  rushdown: "hair",
+  zoner: "helmet",
+  technical: "mask",
+  balanced: "bandana",
+};
+
+function lookFor(f: Fighter): Look {
+  const def = ROSTER[f.char] ?? ROSTER[0];
+  const preset = LOOKS[def.id] ?? {};
+  return {
+    head: preset.head ?? ARCH_HEAD[def.arch] ?? "hair",
+    hair: preset.hair ?? 0x241a14,
+    bulk: preset.bulk ?? Math.max(0.9, Math.min(1.22, 0.86 + (def.weight - 1) * 0.5)),
+    size: preset.size ?? Math.max(0.86, Math.min(1.12, 0.92 + (def.weight - 1) * 0.24)),
+    cape: preset.cape,
+    scarf: preset.scarf,
+    claws: preset.claws,
+  };
+}
+
+function mix(a: number, b: number, t: number): string {
+  const ar = (a >> 16) & 255;
+  const ag = (a >> 8) & 255;
+  const ab = a & 255;
+  const br = (b >> 16) & 255;
+  const bg = (b >> 8) & 255;
+  const bb = b & 255;
+  return `rgb(${Math.round(ar + (br - ar) * t)},${Math.round(ag + (bg - ag) * t)},${Math.round(ab + (bb - ab) * t)})`;
+}
+
+interface Palette {
+  suit: string;
+  suitDark: string;
+  suitLight: string;
+  trim: string;
+  trimDark: string;
+  skin: string;
+  skinDark: string;
+}
+
+function paletteFor(f: Fighter, colorIdx: number): Palette {
+  const c = colorsFor(f.char, colorIdx);
+  return {
+    suit: hex(c.primary),
+    suitDark: mix(c.primary, 0x05060a, 0.46),
+    suitLight: mix(c.primary, 0xffffff, 0.3),
+    trim: hex(c.accent),
+    trimDark: mix(c.accent, 0x05060a, 0.42),
+    skin: hex(c.skin),
+    skinDark: mix(c.skin, 0x1a1208, 0.3),
+  };
+}
+
+type Point = [number, number];
+
+interface Pose {
+  hipY: number;
+  shoulderY: number;
+  headY: number;
+  armF: Point[];
+  armB: Point[];
+  legF: Point[];
+  legB: Point[];
+}
+
+function isKickMove(move: number): boolean {
+  return (move >= 2 && move <= 3) || move === 5 || move === 7 || move >= 10;
+}
+
+function poseFor(f: Fighter, simFrame: number): Pose {
+  const t = f.stFrame || simFrame;
+  const breathe = Math.sin(simFrame * 0.09) * 1.1;
+
+  const p: Pose = {
+    hipY: 46,
+    shoulderY: 74 + breathe,
+    headY: 88 + breathe,
+    armF: [[12, 74 + breathe], [18, 64 + breathe], [20, 55 + breathe]],
+    armB: [[-12, 74 + breathe], [-17, 63 + breathe], [-14, 53 + breathe]],
+    legF: [[4, 46], [7, 28], [9, 4]],
+    legB: [[-4, 46], [-7, 28], [-9, 4]],
+  };
+
+  if (f.st === FS.CROUCH || (f.crouch && f.st !== FS.JUMP && f.st !== FS.HITSTUN)) {
+    p.hipY = 30;
+    p.shoulderY = 56;
+    p.headY = 69;
+    p.legF = [[5, 32], [14, 18], [11, 4]];
+    p.legB = [[-5, 32], [-13, 18], [-11, 4]];
+    p.armF = [[11, 56], [17, 48], [15, 40]];
+    p.armB = [[-11, 56], [-16, 47], [-14, 39]];
+  } else if (f.st === FS.JUMP || f.airborne) {
+    p.hipY = 48;
+    p.legF = [[4, 48], [13, 38], [9, 26]];
+    p.legB = [[-4, 48], [-11, 36], [-13, 24]];
+    p.armF = [[11, 76], [17, 84], [19, 92]];
+    p.armB = [[-11, 76], [-16, 82], [-18, 90]];
+  } else if (f.st === FS.LAND) {
+    p.hipY = 38;
+    p.shoulderY = 68;
+    p.headY = 81;
+    p.legF = [[5, 38], [12, 22], [10, 4]];
+    p.legB = [[-5, 38], [-11, 22], [-11, 4]];
+  } else if (f.st === FS.WALK_F || f.st === FS.WALK_B) {
+    const dir = f.st === FS.WALK_F ? 1 : -1;
+    const s = Math.sin(t * 0.34) * dir;
+    p.legF = [[4, 46], [7 + s * 7, 28], [9 + s * 11, 4 + Math.max(0, s) * 3]];
+    p.legB = [[-4, 46], [-7 - s * 7, 28], [-9 - s * 11, 4 - Math.min(0, s) * 3]];
+    p.armF = [[12, 74], [18 - s * 4, 64], [20 - s * 5, 55]];
+    p.armB = [[-12, 74], [-17 + s * 4, 63], [-14 + s * 5, 53]];
+  } else if (f.st === FS.HITSTUN) {
+    p.shoulderY = 73;
+    p.headY = 86;
+    p.armF = [[8, 72], [0, 66], [3, 58]];
+    p.armB = [[-10, 72], [-18, 64], [-19, 54]];
+    p.legF = [[4, 46], [10, 28], [10, 4]];
+    p.legB = [[-4, 46], [-12, 28], [-15, 6]];
+  } else if (f.st === FS.BLOCKSTUN) {
+    p.hipY = 40;
+    p.shoulderY = 68;
+    p.headY = 82;
+    p.legF = [[4, 40], [9, 24], [8, 4]];
+    p.legB = [[-4, 40], [-9, 24], [-11, 4]];
+    p.armF = [[12, 68], [19, 66], [18, 58]];
+    p.armB = [[5, 68], [14, 62], [13, 54]];
+  } else if (f.st === FS.WON) {
+    p.armF = [[10, 76], [15, 90], [13, 100]];
+    p.armB = [[-10, 76], [-15, 90], [-13, 100]];
+  } else if (f.st === FS.INTRO) {
+    p.armF = [[12, 74], [19, 66], [23, 62]];
+    p.armB = [[-12, 74], [-17, 62], [-18, 52]];
+  }
+
+  if (f.st === FS.ATTACK) {
+    const ph = attackPunchPhase(f);
+    if (isKickMove(f.move)) {
+      p.hipY = 46 - ph * 2;
+      p.legF = [[4, 46], [9 + ph * 14, 34], [11 + ph * 30, 32 - ph * 10]];
+      p.legB = [[-4, 46], [-8, 28], [-10, 4]];
+    } else {
+      p.armF = [[12, 75], [19 + ph * 10, 72], [23 + ph * 20, 70]];
+      p.armB = [[-12, 74], [-17, 62], [-14, 52]];
+    }
+  }
+
+  return p;
+}
+
+function bone(
+  g: CanvasRenderingContext2D,
+  a: Point,
+  m: Point,
+  e: Point,
+  w: number,
+  color: string
+) {
+  const seg = (p: Point, q: Point, width: number) => {
+    const dx = q[0] - p[0];
+    const dy = q[1] - p[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = (-dy / len) * (width / 2);
+    const ny = (dx / len) * (width / 2);
+    g.fillStyle = color;
+    g.beginPath();
+    g.moveTo(p[0] + nx, p[1] + ny);
+    g.lineTo(q[0] + nx, q[1] + ny);
+    g.lineTo(q[0] - nx, q[1] - ny);
+    g.lineTo(p[0] - nx, p[1] - ny);
+    g.closePath();
+    g.fill();
+    g.beginPath();
+    g.arc(p[0], p[1], width / 2, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.arc(q[0], q[1], width / 2, 0, Math.PI * 2);
+    g.fill();
+  };
+  seg(a, m, w);
+  seg(m, e, w * 0.88);
+}
+
+function drawHead(
+  g: CanvasRenderingContext2D,
+  look: Look,
+  pal: Palette,
+  hy: number,
+  c: (v: string) => string
+) {
+  // NOTE: the sprite space is y-up, so a rect's y argument is its LOWER edge
+  // and it grows upward. Every rect below is anchored that way.
+  const hair = hex(look.hair);
+  const dark = c("#141821");
+
+  // neck: hy-14 .. hy-8
+  g.fillStyle = c(pal.skinDark);
+  g.fillRect(-3, hy - 14, 6, 6);
+
+  if (look.head === "hair") {
+    g.fillStyle = c(hair);
+    g.beginPath();
+    g.arc(0, hy + 1.5, 9.6, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(-11, hy - 6, 5, 9);
+  }
+
+  // skull + chin
+  g.fillStyle = c(pal.skin);
+  g.beginPath();
+  g.arc(1, hy, 8.6, 0, Math.PI * 2);
+  g.fill();
+  g.fillRect(-3, hy - 11, 10, 7);
+
+  switch (look.head) {
+    case "mask": {
+      g.fillStyle = c(pal.suit);
+      g.beginPath();
+      g.arc(1, hy, 8.8, 0, Math.PI * 2);
+      g.fill();
+      g.fillRect(-3, hy - 12, 11, 8);
+      g.fillStyle = c("#eaf1ff");
+      g.beginPath();
+      g.ellipse(4.6, hy + 1, 3.4, 2.1, -0.3, 0, Math.PI * 2);
+      g.ellipse(-0.6, hy + 1, 2.4, 1.8, 0.3, 0, Math.PI * 2);
+      g.fill();
+      break;
+    }
+    case "helmet": {
+      g.fillStyle = c(pal.trimDark);
+      g.beginPath();
+      g.arc(1, hy + 1, 9, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = c(pal.skin);
+      g.beginPath();
+      g.arc(2, hy - 2, 6, 0, Math.PI * 2);
+      g.fill();
+      g.fillRect(0, hy - 10, 7, 5);
+      g.fillStyle = c(pal.trimDark);
+      g.fillRect(-8, hy + 1, 18, 2.4);
+      g.fillStyle = dark;
+      g.fillRect(3, hy - 2, 2.4, 2.2);
+      g.fillRect(-1, hy - 2, 1.8, 2);
+      break;
+    }
+    case "bandana": {
+      g.fillStyle = c(hair);
+      g.fillRect(-7, hy + 6, 15, 3);
+      g.fillStyle = c(pal.trim);
+      g.fillRect(-7, hy + 2, 16, 3.4);
+      g.fillRect(-12, hy - 4, 5, 7);
+      g.fillStyle = dark;
+      g.fillRect(3, hy - 2, 2.6, 2.4);
+      g.fillRect(-1.5, hy - 2, 2, 2);
+      g.fillRect(1.5, hy - 6, 3.6, 1.4);
+      break;
+    }
+    case "bare": {
+      g.fillStyle = c(hair);
+      g.fillRect(-6, hy + 6, 14, 3);
+      g.fillRect(-6, hy - 1, 3, 7);
+      g.fillStyle = dark;
+      g.fillRect(3, hy - 2, 2.6, 2.4);
+      g.fillRect(-1.5, hy - 2, 2, 2);
+      g.fillRect(1.5, hy - 6, 3.6, 1.4);
+      break;
+    }
+    default: {
+      g.fillStyle = c(hair);
+      g.fillRect(-7, hy + 6, 15, 3);
+      g.fillRect(-7, hy, 3, 6);
+      g.fillStyle = dark;
+      g.fillRect(3, hy - 2, 2.6, 2.4);
+      g.fillRect(-1.5, hy - 2, 2, 2);
+      g.fillRect(1.5, hy - 6, 3.6, 1.4);
+    }
+  }
+
+  if (look.scarf) {
+    g.fillStyle = c(pal.trim);
+    g.beginPath();
+    g.moveTo(-5, hy - 6);
+    g.lineTo(-10, hy - 14);
+    g.lineTo(-18, hy - 20);
+    g.lineTo(-9, hy - 11);
+    g.closePath();
+    g.fill();
+  }
+}
+
+function paintFigure(
+  g: CanvasRenderingContext2D,
+  f: Fighter,
+  look: Look,
+  pal: Palette,
+  simFrame: number,
+  force: string | null
+) {
+  const p = poseFor(f, simFrame);
+  const c = (v: string) => force ?? v;
+  const hip = p.hipY;
+  const sh = p.shoulderY;
+  const hy = p.headY;
+
+  g.save();
+  g.scale(look.bulk, 1);
+
+  if (look.cape) {
+    g.fillStyle = c(pal.suitDark);
+    g.beginPath();
+    g.moveTo(-8, sh + 2);
+    g.lineTo(0, sh + 2);
+    g.quadraticCurveTo(-13, hip + 6, -20, hip - 18);
+    g.quadraticCurveTo(-9, hip - 2, -6, hip + 1);
+    g.closePath();
+    g.fill();
+  }
+
+  // back leg + boot
+  bone(g, p.legB[0], p.legB[1], p.legB[2], 9, c(pal.suitDark));
+  g.fillStyle = c(pal.trimDark);
+  g.fillRect(p.legB[2][0] - 4, p.legB[2][1] - 1, 12, 6);
+
+  // back arm + fist
+  bone(g, p.armB[0], p.armB[1], p.armB[2], 7, c(pal.suitDark));
+  g.fillStyle = c(pal.trimDark);
+  g.beginPath();
+  g.arc(p.armB[2][0], p.armB[2][1], 3.4, 0, Math.PI * 2);
+  g.fill();
+
+  // front leg + boot
+  bone(g, p.legF[0], p.legF[1], p.legF[2], 10, c(pal.suit));
+  g.fillStyle = c(pal.trim);
+  g.fillRect(p.legF[2][0] - 4, p.legF[2][1], 12, 6);
+
+  // torso: shoulders tapering into the waist with a crotch notch
+  g.beginPath();
+  g.moveTo(-12, sh + 2);
+  g.lineTo(12, sh + 2);
+  g.lineTo(9, hip + 2);
+  g.lineTo(3, hip - 2);
+  g.lineTo(-3, hip - 2);
+  g.lineTo(-9, hip + 2);
+  g.closePath();
+  g.fillStyle = c(pal.suit);
+  g.fill();
+
+  if (!force) {
+    g.fillStyle = pal.suitDark;
+    g.fillRect(-12, hip + 2, 3, sh - hip);
+    g.fillStyle = pal.suitLight;
+    g.fillRect(9, hip + 2, 3, sh - hip);
+  }
+
+  // chest panel + gi lapel
+  g.fillStyle = c(pal.suitDark);
+  g.fillRect(-6, sh - 15, 12, 11);
+  g.fillStyle = c(pal.trim);
+  g.beginPath();
+  g.moveTo(-7, sh + 1);
+  g.lineTo(7, sh + 1);
+  g.lineTo(0, sh - 12);
+  g.closePath();
+  g.fill();
+
+  // belt
+  g.fillStyle = c(pal.trim);
+  g.fillRect(-9, hip - 1, 18, 4);
+
+  // emblem
+  g.fillStyle = c(pal.trim);
+  g.beginPath();
+  g.arc(1, sh - 11, 2.4, 0, Math.PI * 2);
+  g.fill();
+
+  if (look.bulk > 1.12) {
+    g.fillStyle = c(pal.trimDark);
+    g.beginPath();
+    g.arc(-11, sh + 1, 4.6, 0, Math.PI * 2);
+    g.arc(11, sh + 1, 4.6, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  drawHead(g, look, pal, hy, c);
+
+  // front arm + glove
+  bone(g, p.armF[0], p.armF[1], p.armF[2], 8, c(pal.suit));
+  g.fillStyle = c(pal.trim);
+  g.beginPath();
+  g.arc(p.armF[2][0], p.armF[2][1], 3.8, 0, Math.PI * 2);
+  g.fill();
+
+  if (look.claws && !force) {
+    g.strokeStyle = "#e8eef8";
+    g.lineWidth = 1.2;
+    for (let i = 0; i < 3; i++) {
+      g.beginPath();
+      g.moveTo(p.armF[2][0], p.armF[2][1] - 1.6 + i * 2);
+      g.lineTo(p.armF[2][0] + 11, p.armF[2][1] - 3 + i * 2);
+      g.stroke();
+    }
+  }
+
+  g.restore();
+}
+
 function bodyH(f: Fighter): number {
   return f.crouch ? 78 : 116;
 }
@@ -172,142 +687,66 @@ function drawFighter(
   simFrame: number,
   dim: boolean
 ) {
-  const c = colorsFor(f.char, colorIdx);
-  const bx = f.x;
-  const by = FLOOR - f.y;
-  const h = bodyH(f);
-  const face = f.facing;
+  const look = lookFor(f);
+  const pal = paletteFor(f, colorIdx);
 
+  // ground shadow lives in world space so it stays put while the body animates
   ctx.save();
-  ctx.translate(bx, by);
-  ctx.scale(face, 1);
-  if (dim) ctx.globalAlpha = 0.62;
-
-  // shadow
-  ctx.save();
-  ctx.scale(1 / Math.max(0.4, face), 1);
-  ctx.fillStyle = "rgba(0,0,0,0.42)";
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
   ctx.beginPath();
-  ctx.ellipse(0, 2, 30 - f.y * 0.06, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(f.x, FLOOR - f.y + 2, 26 * look.size * look.bulk, 7, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
-  if (f.st === FS.KO) {
-    ctx.rotate(-face * 1.35);
-    ctx.translate(0, 26);
-  }
+  // Paint the figure once, flatten a copy into an outline colour, then let the
+  // GPU stamp that silhouette around the figure. Nine paints per fighter was
+  // costing frames; this is one paint plus a handful of tiny blits.
+  const fig = surface("fig");
+  fig.save();
+  fig.translate(SPR_FEET_X, SPR_FEET_Y);
+  fig.scale(1, -1);
+  paintFigure(fig, f, look, pal, simFrame, null);
+  fig.restore();
 
-  const lean =
-    f.st === FS.HITSTUN ? -0.16 * face : f.st === FS.ATTACK ? 0.07 : f.st === FS.WALK_F ? 0.05 : 0;
-  const bob = Math.sin(simFrame * 0.14) * 2;
+  const sil = surface("sil");
+  sil.drawImage(fig.canvas, 0, 0);
+  sil.globalCompositeOperation = "source-in";
+  sil.fillStyle = OUTLINE;
+  sil.fillRect(0, 0, SPR_W, SPR_H);
+  sil.globalCompositeOperation = "source-over";
 
-  ctx.rotate(lean * 0.4);
-  ctx.translate(0, bob);
+  const g = surface("spr");
+  for (const [ox, oy] of HALO) g.drawImage(sil.canvas, ox, oy);
+  g.drawImage(fig.canvas, 0, 0);
 
-  const hipY = -h * 0.46;
-  const shoulderY = -h * 0.82;
-
-  // legs
-  const legSwing = f.st === FS.WALK_F || f.st === FS.WALK_B ? Math.sin(simFrame * 0.3) * 10 : 0;
-  const airTuck = f.airborne ? 14 : 0;
-  ctx.strokeStyle = hex(c.secondary);
-  ctx.lineWidth = 12;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(-5, hipY);
-  ctx.lineTo(-7 + legSwing, -6 - airTuck);
-  ctx.moveTo(5, hipY);
-  ctx.lineTo(7 - legSwing, -6 - airTuck);
-  ctx.stroke();
-
-  // torso
-  const tg = ctx.createLinearGradient(-18, shoulderY, 18, hipY);
-  tg.addColorStop(0, hex(c.primary));
-  tg.addColorStop(1, hex(c.secondary));
-  ctx.fillStyle = tg;
-  rr(ctx, -17, shoulderY, 34, hipY - shoulderY + 8, 12);
-  ctx.fill();
-
-  // chest emblem
-  ctx.fillStyle = hex(c.accent);
-  ctx.globalAlpha = dim ? 0.36 : 0.9;
-  rr(ctx, -8, shoulderY + 12, 16, 12, 5);
-  ctx.fill();
-  ctx.globalAlpha = dim ? 0.62 : 1;
-
-  // head
-  ctx.fillStyle = hex(c.skin);
-  ctx.beginPath();
-  ctx.arc(3, shoulderY - 13, 13, 0, Math.PI * 2);
-  ctx.fill();
-  // mask / hair
-  ctx.fillStyle = hex(c.primary);
-  ctx.beginPath();
-  ctx.arc(3, shoulderY - 16, 13, Math.PI * 1.05, Math.PI * 2.05);
-  ctx.fill();
-  // eye
-  ctx.fillStyle = "#0a0a12";
-  ctx.fillRect(11, shoulderY - 16, 4, 3);
-
-  // arms — extended based on the active move
-  const moves = ROSTER[f.char];
-  ctx.strokeStyle = hex(c.skin);
-  ctx.lineWidth = 9;
-  const punchPhase = attackPunchPhase(f);
-  const isKick = f.move >= 2 && f.move <= 3 || f.move === 5 || f.move === 7 || f.move >= 10;
-  const armX = 16 + punchPhase * 44;
-  const armY = shoulderY + 6 - punchPhase * 6;
-  ctx.beginPath();
-  ctx.moveTo(4, shoulderY + 8);
-  ctx.lineTo(armX, armY);
-  ctx.stroke();
-  // glove
-  ctx.fillStyle = hex(c.accent);
-  ctx.beginPath();
-  ctx.arc(armX, armY, 7 + punchPhase * 3, 0, Math.PI * 2);
-  ctx.fill();
-  // back arm
-  ctx.strokeStyle = hex(c.skin);
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.moveTo(-4, shoulderY + 10);
-  ctx.lineTo(-14 - punchPhase * 6, shoulderY + 22);
-  ctx.stroke();
-
-  // kicking leg extends instead
-  if (isKick && punchPhase > 0.05) {
-    ctx.strokeStyle = hex(c.secondary);
-    ctx.lineWidth = 13;
-    ctx.beginPath();
-    ctx.moveTo(6, hipY);
-    ctx.lineTo(6 + punchPhase * 54, hipY + 10 - punchPhase * 34);
-    ctx.stroke();
-    ctx.fillStyle = hex(c.accent);
-    ctx.beginPath();
-    ctx.arc(6 + punchPhase * 54, hipY + 10 - punchPhase * 34, 8, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // hit flash
   if (f.flash > 0) {
-    ctx.globalCompositeOperation = "lighter";
-    ctx.fillStyle = `rgba(255,120,150,${f.flash / 8})`;
-    rr(ctx, -22, shoulderY - 26, 46, -shoulderY + 34, 16);
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
+    g.globalCompositeOperation = "source-atop";
+    g.fillStyle = `rgba(255,255,255,${Math.min(0.72, f.flash / 9)})`;
+    g.fillRect(0, 0, SPR_W, SPR_H);
+    g.globalCompositeOperation = "source-over";
   }
 
-  // invulnerability shimmer
-  if (f.invuln > 0 && f.st !== FS.INTRO) {
-    ctx.globalAlpha = 0.3;
-    ctx.strokeStyle = "#79a8ff";
-    ctx.lineWidth = 2;
-    rr(ctx, -22, shoulderY - 26, 46, -shoulderY + 34, 16);
-    ctx.stroke();
-    ctx.globalAlpha = dim ? 0.62 : 1;
+  const k = 2 * look.size;
+  ctx.save();
+  ctx.translate(f.x, FLOOR - f.y);
+  if (f.st === FS.KO) {
+    ctx.rotate(-f.facing * 1.45);
+    ctx.translate(-4, 2);
   }
-
+  ctx.scale(f.facing * k, k);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = dim ? 0.55 : 1;
+  ctx.drawImage(g.canvas, -SPR_FEET_X, -SPR_FEET_Y);
   ctx.restore();
+
+  if (f.invuln > 0 && f.st !== FS.INTRO) {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "#79a8ff";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(f.x - 24, FLOOR - f.y - bodyH(f) - 8, 48, bodyH(f) + 8);
+    ctx.restore();
+  }
 
   // assist marker
   if (f.st === FS.ASSIST || (!f.active && f.onScreen)) {
@@ -315,10 +754,11 @@ function drawFighter(
     ctx.fillStyle = "rgba(121,168,255,0.9)";
     ctx.font = "600 11px JetBrains Mono, monospace";
     ctx.textAlign = "center";
-    ctx.fillText("ASSIST", bx, by - h - 14);
+    ctx.fillText("ASSIST", f.x, FLOOR - f.y - bodyH(f) - 14);
     ctx.restore();
   }
 }
+
 
 function attackPunchPhase(f: Fighter): number {
   if (f.st !== FS.ATTACK) return 0;
