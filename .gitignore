@@ -38,3 +38,30 @@ Thumbs.db
 !.env.example
 .vars
 .dev.vars
+
+# --- Ikemen GO cabinet: assets stay local, the roster is tracked ---
+/Ikemen/chars/
+/Ikemen/stages/
+/Ikemen/sound/
+/Ikemen/font/
+/Ikemen/external/
+/Ikemen/video/
+/Ikemen/lib/
+/Ikemen/*.exe
+/Ikemen/data/*.sff
+/Ikemen/data/*.snd
+/Ikemen/data/*.orig
+/tools/
+
+# Ikemen cabinet: assets stay local, the roster is tracked
+/Ikemen/chars/
+/Ikemen/stages/
+/Ikemen/sound/
+/Ikemen/font/
+/Ikemen/external/
+/Ikemen/video/
+/Ikemen/lib/
+/Ikemen/*.exe
+/Ikemen/data/*.sff
+/Ikemen/data/*.snd
+/Ikemen/data/*.orig

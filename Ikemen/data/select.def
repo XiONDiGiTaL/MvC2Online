@@ -1,0 +1,146 @@
+;-------------------------------------------------------------------------------
+[Characters]
+ ; MvC2 roster, Marvel 0-27 then Capcom 28-55. Order matches the
+ ; web client's select grid, so both cabinets show the same rows.
+
+Cable, stages/XX'MVC2'DESERT'XX.def    ; 00 Cable
+Marrow, stages/XX'MVC2'DESERT'ALT'XX.def    ; 01 Marrow
+CaptainAmerica, stages/XX'AIRSHIP'XX.def    ; 02 Captain America
+Cyclops, stages/XX'ARCTIC'XX.def    ; 03 Cyclops
+Wolverine, stages/XX'CLOCK'2'XX.def    ; 04 Wolverine
+BoneClawWolverine, stages/XX'SWAMP'XX.def    ; 05 Wolverine (Bone)
+Spider-Man, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 06 Spider-Man
+Hulk, stages/[MVC2]Circus_Carnival.def    ; 07 Hulk
+IronMan, stages/XX'MVC2'DESERT'XX.def    ; 08 Iron Man
+Iceman, stages/XX'MVC2'DESERT'ALT'XX.def    ; 09 Iceman
+WarMachine, stages/XX'AIRSHIP'XX.def    ; 10 War Machine
+Gambit, stages/XX'ARCTIC'XX.def    ; 11 Gambit
+Rogue, stages/XX'CLOCK'2'XX.def    ; 12 Rogue
+Colossus, stages/XX'SWAMP'XX.def    ; 13 Colossus
+Psylocke, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 14 Psylocke
+Storm, stages/[MVC2]Circus_Carnival.def    ; 15 Storm
+SilverSamurai, stages/XX'MVC2'DESERT'XX.def    ; 16 Silver Samurai
+Sabretooth, stages/XX'MVC2'DESERT'ALT'XX.def    ; 17 Sabretooth
+Juggernaut, stages/XX'AIRSHIP'XX.def    ; 18 Juggernaut
+Shuma-Gorath, stages/XX'ARCTIC'XX.def    ; 19 Shuma-Gorath
+Spiral, stages/XX'CLOCK'2'XX.def    ; 20 Spiral
+Blackheart, stages/XX'SWAMP'XX.def    ; 21 Blackheart
+Marvel_vs_Capcom_2_Venom_v1/Venom1/venom1.def, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 22 Venom
+Sentinel, stages/[MVC2]Circus_Carnival.def    ; 23 Sentinel
+DoctorDoom, stages/XX'MVC2'DESERT'XX.def    ; 24 Doctor Doom
+OmegaRed, stages/XX'MVC2'DESERT'ALT'XX.def    ; 25 Omega Red
+Thanos, stages/XX'AIRSHIP'XX.def    ; 26 Thanos
+Magneto, stages/XX'ARCTIC'XX.def    ; 27 Magneto
+RubyHeart, stages/XX'CLOCK'2'XX.def    ; 28 Ruby Heart
+Amingo, stages/XX'SWAMP'XX.def    ; 29 Amingo
+Sonson, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 30 SonSon
+Ryu, stages/[MVC2]Circus_Carnival.def    ; 31 Ryu
+Ken, stages/XX'MVC2'DESERT'XX.def    ; 32 Ken
+Chun-Li, stages/XX'MVC2'DESERT'ALT'XX.def    ; 33 Chun-Li
+Guile, stages/XX'AIRSHIP'XX.def    ; 34 Guile
+Zangief, stages/XX'ARCTIC'XX.def    ; 35 Zangief
+Dhalsim, stages/XX'CLOCK'2'XX.def    ; 36 Dhalsim
+Charlie, stages/XX'SWAMP'XX.def    ; 37 Charlie
+Sakura, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 38 Sakura
+Dan, stages/[MVC2]Circus_Carnival.def    ; 39 Dan
+Cammy, stages/XX'MVC2'DESERT'XX.def    ; 40 Cammy
+M.Bison, stages/XX'MVC2'DESERT'ALT'XX.def    ; 41 M. Bison
+Akuma, stages/XX'AIRSHIP'XX.def    ; 42 Akuma
+Jill, stages/XX'ARCTIC'XX.def    ; 43 Jill
+Jin, stages/XX'CLOCK'2'XX.def    ; 44 Jin
+StriderHiryu, stages/XX'SWAMP'XX.def    ; 45 Strider Hiryu
+Hayato, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 46 Hayato
+Megaman, stages/[MVC2]Circus_Carnival.def    ; 47 Mega Man
+Roll, stages/XX'MVC2'DESERT'XX.def    ; 48 Roll
+TronBonne, stages/XX'MVC2'DESERT'ALT'XX.def    ; 49 Tron Bonne
+Servbot, stages/XX'AIRSHIP'XX.def    ; 50 Servbot
+B.B.Hood, stages/XX'ARCTIC'XX.def    ; 51 B.B. Hood
+Felicia, stages/XX'CLOCK'2'XX.def    ; 52 Felicia
+Morrigan, stages/XX'SWAMP'XX.def    ; 53 Morrigan
+CaptainCommando, stages/XX'UNDERGROUND'CAVERN'XX.def    ; 54 Captain Commando
+Anakaris, stages/[MVC2]Circus_Carnival.def    ; 55 Anakaris
+
+ ; Not on the MvC2 grid, kept because the folders are here.
+Abyss, random    ; final boss
+Norimaro, random    ; Japanese-only secret
+Thor, random    ; bonus
+
+[ExtraStages]
+stages/XX'MVC2'DESERT'XX.def
+stages/XX'MVC2'DESERT'ALT'XX.def
+stages/XX'AIRSHIP'XX.def
+stages/XX'ARCTIC'XX.def
+stages/XX'CLOCK'2'XX.def
+stages/XX'SWAMP'XX.def
+stages/XX'UNDERGROUND'CAVERN'XX.def
+stages/[MVC2]Circus_Carnival.def
+
+[Options]
+ ;Here you set the maximum number of matches to fight before the game ends in
+ ;roster-building modes. Each value maps to an order priority from the order
+ ;table selected for the active mode. For example, for 4,3,1 you will fight up
+ ;to 4 randomly-picked characters with order=1, followed by 3 with order=2 and
+ ;1 with order=3.
+ ;IKEMEN feature: Max 30 orders mugen limitation is lifted.
+ ;IKEMEN feature: Characters can use mode-specific order<gamemode> parameters.
+ ;Roster generation checks order<active mode>, then order<base mode>, then
+ ;order. If no mode-specific order exists, the default order parameter is used.
+ ;IKEMEN feature: Characters can use individual maxmatches settings (see
+ ;'maxmatches' parameter in [Characters] section)
+
+ ;Maximum number of matches to fight before game ends in Arcade single mode.
+arcade.maxmatches = 6,1,1,0,0,0,0,0,0,0
+
+ ;Like arcade.maxmatches, but applies to Arcade team modes.
+team.maxmatches = 4,1,1,0,0,0,0,0,0,0
+
+ ;Maximum number of matches to fight before game ends in Time Attack mode.
+ ;Uses ordertimeattack if defined, otherwise falls back to order.
+timeattack.maxmatches = 6,1,1,0,0,0,0,0,0,0
+
+ ;IKEMEN feature: Similar to arcade.maxmatches, but applies to Survival modes.
+ ;Uses ordersurvival if defined, otherwise falls back to order.
+ ;Use -1 value to choose which order number should have unlimited matches.
+ ;By omitting -1 survival mode will end after particular amount of matches set
+ ;below (in such case you can actually "complete" the mode).
+survival.maxmatches = -1,0,0,0,0,0,0,0,0,0
+
+;-------------------------------------------------------------------------------
+[StoryMode]
+ ;Story Mode arcs declaration. Assigned arcs are selectable via Story Mode
+ ;submenu ('menu.itemname.storymode' parameter in screenpack DEF file)
+ ;
+ ;Declaring arcs consists of setting up following parameters:
+ ; - name
+ ;   IKEMEN feature: Set to name that should be returned by GameMode trigger.
+ ;   This parameter also initiates new story arc declaration, so it has to be
+ ;   assigned before any other parameter used by the same arc. All arcs should
+ ;   have unique names.
+ ;
+ ; - displayname
+ ;   IKEMEN feature: Set to name that should be displayed in Story Mode submenu.
+ ;
+ ; - path
+ ;   IKEMEN feature: Path to file with lua extension (relative to game
+ ;   directory), containing story mode arc coded in Lua language.
+ ;   https://github.com/ikemen-engine/Ikemen-GO/wiki/Miscellaneous-Info#arcs
+ ;
+ ; - unlock
+ ;   IKEMEN feature: Pure Lua code, executed exactly as is, each time upon
+ ;   loading main menu. If it evaluates to boolean 'true' the story arc will be
+ ;   selectable from story mode submenu, or hidden on 'false'. Default: true.
+ ;   https://github.com/ikemen-engine/Ikemen-GO/wiki/Miscellaneous-Info#lua_unlock
+ ;
+ ;Examples:
+ ; name = arc1
+ ; displayname = Kung Fu Story Part I
+ ; path = data/story/arc1.lua
+ ; unlock = true
+ ;
+ ; name = arc2
+ ; displayname = Kung Fu Story Part II
+ ; path = data/story/arc2.lua
+ ; unlock = true
+ ;
+ ;Declare your Story Mode arcs below.
+
